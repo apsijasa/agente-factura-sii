@@ -15,6 +15,20 @@ export interface ResultadoEmision {
   pdf: Buffer;
 }
 
+/**
+ * La emisión fue CONFIRMADA por el SII (hay folio), pero falló la descarga
+ * del PDF. Quien lo capture debe persistir el folio y tratar la descarga
+ * como reintentable; NUNCA debe tratarse como emisión incierta.
+ */
+export class EmisionConfirmadaSinPdfError extends Error {
+  constructor(
+    readonly folio: string,
+    detalle: string,
+  ) {
+    super(`Emisión CONFIRMADA con folio ${folio}, pero falló la descarga del PDF: ${detalle}`);
+  }
+}
+
 export interface ISiiAdapter {
   abrirYPreparar(payload: InvoicePayload): Promise<void>;
   extraerPreview(payload: InvoicePayload): Promise<ResultadoPreview>;
@@ -35,7 +49,14 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
   ) {}
 
   private async paginaActiva(): Promise<Page> {
-    if (this.pagina) return this.pagina;
+    if (this.pagina) {
+      // No se relanza en silencio: una sesión nueva perdería el estado del
+      // formulario y la autenticación del operador sin que nadie lo note.
+      if (this.pagina.isClosed() || !this.navegador?.isConnected()) {
+        throw new Error('el navegador del SII fue cerrado; reinicie el comando');
+      }
+      return this.pagina;
+    }
     // Navegador VISIBLE: el operador humano completa credencial/certificado/MFA.
     // El agente NUNCA evade CAPTCHA ni MFA (diseño §3.5).
     this.navegador = await chromium.launch({ headless: false });
@@ -94,18 +115,35 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     const pagina = await this.paginaActiva();
     // ÚNICA acción de emisión. Sin reintentos automáticos (diseño §10).
     await pagina.getByRole('button', { name: SELECTORES.botonEmitir.nombre }).click();
-    await pagina.waitForLoadState('networkidle');
-    const texto = await pagina.innerText('body');
-    const m = SELECTORES.folioEnConfirmacion.exec(texto);
-    if (!m) throw new Error('RESPUESTA_INCIERTA: no se encontró folio en la confirmación');
-    const folio = m[1] as string;
-    const [descarga] = await Promise.all([
-      pagina.waitForEvent('download'),
-      pagina.getByRole('link', { name: SELECTORES.enlacePdf.nombre }).first().click(),
-    ]);
-    const rutaTmp = await descarga.path();
-    const { readFile } = await import('node:fs/promises');
-    return { folio, pdf: await readFile(rutaTmp) };
+
+    // Tras el clic de emisión NO se sabe si el SII procesó la solicitud:
+    // cualquier fallo antes de confirmar el folio se etiqueta como incierto.
+    let folio: string;
+    try {
+      await pagina.waitForLoadState('networkidle');
+      const texto = await pagina.innerText('body');
+      const m = SELECTORES.folioEnConfirmacion.exec(texto);
+      if (!m) throw new Error('RESPUESTA_INCIERTA: no se encontró folio en la confirmación');
+      folio = m[1] as string;
+    } catch (error) {
+      const mensaje = (error as Error).message;
+      if (mensaje.startsWith('RESPUESTA_INCIERTA:')) throw error;
+      throw new Error(`RESPUESTA_INCIERTA: fallo tras el clic de emisión: ${mensaje}`);
+    }
+
+    // Con folio confirmado, un fallo en la descarga del PDF NO es incierto:
+    // la emisión existe y el folio debe sobrevivir para persistirse.
+    try {
+      const [descarga] = await Promise.all([
+        pagina.waitForEvent('download'),
+        pagina.getByRole('link', { name: SELECTORES.enlacePdf.nombre }).first().click(),
+      ]);
+      const rutaTmp = await descarga.path();
+      const { readFile } = await import('node:fs/promises');
+      return { folio, pdf: await readFile(rutaTmp) };
+    } catch (error) {
+      throw new EmisionConfirmadaSinPdfError(folio, (error as Error).message);
+    }
   }
 
   async consultarDocumentosEmitidos(rutReceptor: string, fecha: string): Promise<string | null> {

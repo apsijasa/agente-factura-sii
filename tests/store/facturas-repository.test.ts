@@ -81,4 +81,25 @@ describe('FacturasRepository.reconciliar', () => {
     store.guardarFolio(payload.factura_id, '777');
     await expect(repo.reconciliar()).rejects.toThrow(/contradicci[oó]n/i);
   });
+
+  it('detiene el proceso si los folios de Excel y SQLite difieren', async () => {
+    const { store, repo } = crear([
+      { factura_id: payload.factura_id, folio_sii: '999', estado: 'EMITIDA' },
+    ]);
+    store.crearFactura(payload, 'h');
+    store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 't');
+    store.registrarTransicion(payload.factura_id, 'APROBADA', 't');
+    store.registrarTransicion(payload.factura_id, 'EMITIENDO', 't');
+    store.registrarTransicion(payload.factura_id, 'EMITIDA', 't');
+    store.guardarFolio(payload.factura_id, '777');
+    await expect(repo.reconciliar()).rejects.toThrow(/contradicci[oó]n/i);
+  });
+
+  it('trata un folio de solo espacios en Excel como ausente', async () => {
+    const { store, repo } = crear([
+      { factura_id: payload.factura_id, folio_sii: '   ', estado: 'BORRADOR' },
+    ]);
+    store.crearFactura(payload, 'h'); // sin folio en SQLite
+    await expect(repo.reconciliar()).resolves.toBeUndefined();
+  });
 });
