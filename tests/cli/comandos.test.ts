@@ -35,7 +35,14 @@ function dependenciasSimuladas(): Dependencias {
       agregarFilaFacturas: vi.fn(async (fila) => { tablas.tblFacturas!.push(fila as never); }),
       actualizarFilaFacturas: vi.fn(async () => undefined),
     } as never,
-    uf: { obtenerValorUf: vi.fn(async () => ({ valor: 39418.53, fecha: '2026-07-05', url: 'x', consultadoEn: 'y' })) } as never,
+    uf: {
+      obtenerValorUf: vi.fn(async () => ({
+        valor: 39418.53,
+        fecha: '2026-07-05',
+        url: 'https://www.sii.cl/valores_y_fechas/uf/uf2026.htm',
+        consultadoEn: '2026-07-05T09:00:00.000Z',
+      })),
+    } as never,
     sii: {
       abrirYPreparar: vi.fn(),
       extraerPreview: vi.fn(async () => ({ totales: { netoClp: 1320521, ivaClp: 250899, totalClp: 1571420 }, coinciden: true, diferencias: [] })),
@@ -63,6 +70,17 @@ describe('ejecutarPrepare (simulación)', () => {
     expect((deps.sii.abrirYPreparar as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((deps.correo.enviarFactura as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((deps.excel.agregarFilaFacturas as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+  });
+
+  it('registra la procedencia del valor UF (valor, fecha, url y momento) en la auditoría', async () => {
+    const deps = dependenciasSimuladas();
+    await ejecutarPrepare(deps, '2026-07-05');
+    const eventos = deps.store.obtenerEventos('RECURRENT:E1:CL1:2026-07');
+    const conProcedencia = eventos.find((e) => e.detalle.includes('https://www.sii.cl/valores_y_fechas/uf/uf2026.htm'));
+    expect(conProcedencia).toBeDefined();
+    expect(conProcedencia?.detalle).toContain('39418.53');
+    expect(conProcedencia?.detalle).toContain('2026-07-05');
+    expect(conProcedencia?.detalle).toContain('2026-07-05T09:00:00.000Z');
   });
 
   it('es idempotente: una segunda ejecución no duplica la factura', async () => {

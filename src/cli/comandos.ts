@@ -59,10 +59,16 @@ export async function ejecutarPrepare(deps: Dependencias, fecha?: string): Promi
       throw new Error(`Datos maestros incompletos para el grupo ${grupo.clave}`);
     }
     const requiereUf = grupo.cobros.some((c) => c.moneda === 'UF');
-    const valorUf = requiereUf ? (await deps.uf.obtenerValorUf(grupo.fechaProgramada)).valor : null;
-    const payload = construirPayload(grupo, empresa, cliente, clasificacion, valorUf);
+    const uf = requiereUf ? await deps.uf.obtenerValorUf(grupo.fechaProgramada) : null;
+    const payload = construirPayload(grupo, empresa, cliente, clasificacion, uf?.valor ?? null);
     deps.store.crearFactura(payload, hashPayload(payload));
-    deps.store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparación en simulación');
+    // Diseño §5 UfProvider: la procedencia del valor UF (valor, fecha, URL de
+    // origen y momento de consulta) queda auditada en state_events.
+    const detalle = uf
+      ? `preparación en simulación; UF ${uf.valor} (${uf.fecha}) de ${uf.url} consultada ${uf.consultadoEn}`
+      : 'preparación en simulación';
+    if (uf) logger.info({ facturaId: payload.factura_id, uf }, 'valor UF registrado con procedencia');
+    deps.store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', detalle);
     await deps.excel.agregarFilaFacturas(filaExcelDesdePayload(payload, 'PENDIENTE_APROBACION'));
     resultado.preparadas.push(payload.factura_id);
   }
