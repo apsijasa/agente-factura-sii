@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { InvoicePayload } from './tipos.js';
 
 export function jsonCanonico(valor: unknown): string {
+  if (valor === undefined) throw new Error('jsonCanonico: undefined no es serializable');
   if (valor === null || typeof valor !== 'object') return JSON.stringify(valor);
   if (Array.isArray(valor)) return `[${valor.map(jsonCanonico).join(',')}]`;
   const claves = Object.keys(valor as Record<string, unknown>).sort();

@@ -45,6 +45,11 @@ describe('jsonCanonico', () => {
   it('preserva el orden de los arreglos', () => {
     expect(jsonCanonico([2, 1])).toBe('[2,1]');
   });
+  it('lanza un error claro ante valores undefined', () => {
+    expect(() => jsonCanonico(undefined)).toThrow(/undefined/);
+    expect(() => jsonCanonico({ a: undefined })).toThrow(/undefined/);
+    expect(() => jsonCanonico([1, undefined])).toThrow(/undefined/);
+  });
 });
 
 describe('hashPayload', () => {
@@ -56,5 +61,11 @@ describe('hashPayload', () => {
   it('cambia si cambia cualquier campo del payload', () => {
     expect(hashPayload({ ...payload, total_clp: 1571421 })).not.toBe(hashPayload(payload));
     expect(hashPayload({ ...payload, destinatarios: ['otro@x.cl'] })).not.toBe(hashPayload(payload));
+  });
+  it('cambia si cambia un campo anidado de una línea', () => {
+    const primeraLinea = payload.lineas[0];
+    if (!primeraLinea) throw new Error('payload de prueba sin líneas');
+    const mutado = { ...payload, lineas: [{ ...primeraLinea, total_linea_clp: 1 }] };
+    expect(hashPayload(mutado)).not.toBe(hashPayload(payload));
   });
 });

@@ -34,10 +34,35 @@ const rutValidado = z.string().transform((v, ctx) => {
   return normalizarRut(v) as string;
 });
 
-const booleano = z.string().transform((v) => parsearBooleano(v));
+const booleano = z.string().transform((v, ctx) => {
+  try {
+    return parsearBooleano(v);
+  } catch (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : `Valor booleano no reconocido: "${v}"`,
+    });
+    return z.NEVER;
+  }
+});
 const correo = z.string().regex(RE_CORREO, 'Correo inválido');
-const fechaIso = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha debe ser AAAA-MM-DD');
+
+function esFechaDeCalendario(v: string): boolean {
+  const fecha = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(fecha.getTime()) && fecha.toISOString().slice(0, 10) === v;
+}
+
+const fechaIso = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha debe ser AAAA-MM-DD')
+  .refine(esFechaDeCalendario, 'Fecha inexistente en el calendario');
 const idNoVacio = z.string().trim().min(1);
+
+const celdaNumerica = z.union([
+  z.number(),
+  z.string().trim().min(1, 'Celda numérica vacía'),
+]);
+const numeroDeCelda = (esquema: z.ZodNumber) => celdaNumerica.pipe(z.coerce.number()).pipe(esquema);
 
 export const esquemaEmpresa = z.object({
   empresa_id: idNoVacio,
@@ -70,12 +95,12 @@ export const esquemaCobro = z
     cliente_id: idNoVacio,
     descripcion_servicio: idNoVacio,
     moneda: z.enum(['CLP', 'UF']),
-    monto_neto: z.coerce.number().positive(),
-    cantidad: z.coerce.number().positive(),
+    monto_neto: numeroDeCelda(z.number().positive()),
+    cantidad: numeroDeCelda(z.number().positive()),
     frecuencia: z.literal('MENSUAL'),
-    dia_emision: z.coerce.number().int().min(1).max(28),
+    dia_emision: numeroDeCelda(z.number().int().min(1).max(28)),
     forma_pago: z.enum(['CONTADO', 'CREDITO']),
-    dias_vencimiento: z.coerce.number().int().min(0),
+    dias_vencimiento: numeroDeCelda(z.number().int().min(0)),
     fecha_inicio: fechaIso,
     fecha_fin: z
       .string()

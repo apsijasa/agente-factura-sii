@@ -66,6 +66,13 @@ describe('esquemaEmpresa', () => {
   it('rechaza RUT con DV incorrecto', () => {
     expect(() => esquemaEmpresa.parse({ ...empresaOk, rut_emisor: '12.345.678-9' })).toThrow(/RUT/);
   });
+  it('safeParse devuelve success false ante booleano inválido en vez de lanzar', () => {
+    const resultado = esquemaEmpresa.safeParse({ ...empresaOk, activo: 'quizás' });
+    expect(resultado.success).toBe(false);
+    if (!resultado.success) {
+      expect(resultado.error.issues[0]?.message).toMatch(/booleano/);
+    }
+  });
 });
 
 describe('esquemaCliente', () => {
@@ -100,5 +107,23 @@ describe('esquemaCobro', () => {
   it('rechaza moneda desconocida y dia_emision fuera de rango', () => {
     expect(() => esquemaCobro.parse({ ...cobroOk, moneda: 'USD' })).toThrow();
     expect(() => esquemaCobro.parse({ ...cobroOk, dia_emision: '29' })).toThrow();
+  });
+  it('rechaza fechas inexistentes en el calendario', () => {
+    expect(() => esquemaCobro.parse({ ...cobroOk, fecha_inicio: '2026-02-30' })).toThrow();
+    expect(() => esquemaCobro.parse({ ...cobroOk, fecha_fin: '2026-02-30' })).toThrow();
+  });
+  it('acepta fechas válidas de fin de mes', () => {
+    const c = esquemaCobro.parse({ ...cobroOk, fecha_inicio: '2026-02-28' });
+    expect(c.fecha_inicio).toBe('2026-02-28');
+  });
+  it('rechaza celdas numéricas vacías en vez de convertirlas a 0', () => {
+    expect(() => esquemaCobro.parse({ ...cobroOk, dias_vencimiento: '' })).toThrow();
+    expect(() => esquemaCobro.parse({ ...cobroOk, monto_neto: '' })).toThrow();
+    expect(() => esquemaCobro.parse({ ...cobroOk, cantidad: '' })).toThrow();
+    expect(() => esquemaCobro.parse({ ...cobroOk, dia_emision: '' })).toThrow();
+  });
+  it('sigue aceptando "0" explícito en dias_vencimiento para CONTADO', () => {
+    const c = esquemaCobro.parse({ ...cobroOk, dias_vencimiento: '0' });
+    expect(c.dias_vencimiento).toBe(0);
   });
 });
