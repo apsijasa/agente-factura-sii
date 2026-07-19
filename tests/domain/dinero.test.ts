@@ -20,6 +20,10 @@ describe('lineaClp', () => {
   it('rechaza cantidad no positiva', () => {
     expect(() => lineaClp(95000, 0)).toThrow(/cantidad/);
   });
+  it('redondea el total con cantidad fraccionaria sin error de coma flotante', () => {
+    // 95000 * 1.15 = 109.250 exacto (float nativo daría 109249.99999999999)
+    expect(lineaClp(95000, 1.15)).toEqual({ precioUnitarioClp: 95000, totalLineaClp: 109250 });
+  });
 });
 
 describe('lineaUf', () => {
@@ -30,6 +34,10 @@ describe('lineaUf', () => {
   it('multiplica el unitario ya redondeado por la cantidad', () => {
     // 2.5 UF * 39418.53 = 98.546,325 -> 98.546; * 3 = 295.638
     expect(lineaUf(2.5, 3, 39418.53)).toEqual({ precioUnitarioClp: 98546, totalLineaClp: 295638 });
+  });
+  it('redondea el total con cantidad fraccionaria sin error de coma flotante', () => {
+    // unitario 98.546; * 1.15 = 113.327,9 -> 113.328 (float nativo daría 113327.89999999999)
+    expect(lineaUf(2.5, 1.15, 39418.53)).toEqual({ precioUnitarioClp: 98546, totalLineaClp: 113328 });
   });
 });
 

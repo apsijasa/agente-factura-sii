@@ -17,7 +17,7 @@ export function lineaClp(montoNeto: number, cantidad: number): LineaCalculada {
     throw new Error(`monto_neto CLP debe ser un entero positivo, recibido: ${montoNeto}`);
   }
   validarCantidad(cantidad);
-  return { precioUnitarioClp: montoNeto, totalLineaClp: montoNeto * cantidad };
+  return { precioUnitarioClp: montoNeto, totalLineaClp: redondearHalfUp(new D(montoNeto).mul(cantidad)) };
 }
 
 export function lineaUf(montoNetoUf: number, cantidad: number, valorUf: number): LineaCalculada {
@@ -25,7 +25,7 @@ export function lineaUf(montoNetoUf: number, cantidad: number, valorUf: number):
   if (valorUf <= 0) throw new Error(`valor_uf debe ser positivo, recibido: ${valorUf}`);
   validarCantidad(cantidad);
   const precioUnitarioClp = redondearHalfUp(new D(montoNetoUf).mul(valorUf));
-  return { precioUnitarioClp, totalLineaClp: precioUnitarioClp * cantidad };
+  return { precioUnitarioClp, totalLineaClp: redondearHalfUp(new D(precioUnitarioClp).mul(cantidad)) };
 }
 
 export function totalesEsperados(totalesLinea: number[]): { netoClp: number; ivaClp: number; totalClp: number } {
