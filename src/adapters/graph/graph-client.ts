@@ -3,7 +3,7 @@ import {
   PublicClientApplication,
   type AuthenticationResult,
 } from '@azure/msal-node';
-import { conReintentos } from './reintentos.js';
+import { conReintentos, HttpError, HTTP_TIMEOUT_MS } from './reintentos.js';
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 const SCOPES = ['User.Read', 'Files.ReadWrite', 'Mail.Send', 'offline_access'];
@@ -26,11 +26,15 @@ export class GraphClient implements IGraphClient {
             'Content-Type': 'application/json',
           },
           body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+          signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
         });
         if (!respuesta.ok) {
           const detalle = await respuesta.text();
           // No incluir el token ni encabezados en el error.
-          throw new Error(`HTTP ${respuesta.status} en ${metodo} ${ruta}: ${detalle.slice(0, 300)}`);
+          throw new HttpError(
+            respuesta.status,
+            `HTTP ${respuesta.status} en ${metodo} ${ruta}: ${detalle.slice(0, 300)}`,
+          );
         }
         if (respuesta.status === 204) return undefined as T;
         return (await respuesta.json()) as T;

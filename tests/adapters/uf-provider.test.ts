@@ -36,6 +36,32 @@ describe('parseUfHtml', () => {
     expect(parseUfHtml(html, '2026-08-31')).toBeNull();
     expect(parseUfHtml(html, '2026-07-09')).toBeNull();
   });
+  it('lanza error si dos tablas entregan valores distintos para la misma fecha', () => {
+    const duplicado = `<html><body>
+<table>
+  <tr><th>Día</th><th>Jul</th></tr>
+  <tr><th>5</th><td>39.418,53</td></tr>
+</table>
+<table>
+  <tr><th>Día</th><th>Jul</th></tr>
+  <tr><th>5</th><td>39.999,99</td></tr>
+</table>
+</body></html>`;
+    expect(() => parseUfHtml(duplicado, '2026-07-05')).toThrow(/ambiguo/);
+  });
+  it('acepta valores duplicados idénticos para la misma fecha', () => {
+    const duplicadoIdentico = `<html><body>
+<table>
+  <tr><th>Día</th><th>Jul</th></tr>
+  <tr><th>5</th><td>39.418,53</td></tr>
+</table>
+<table>
+  <tr><th>Día</th><th>Jul</th></tr>
+  <tr><th>5</th><td>39.418,53</td></tr>
+</table>
+</body></html>`;
+    expect(parseUfHtml(duplicadoIdentico, '2026-07-05')).toBe(39418.53);
+  });
 });
 
 describe('validarValorUf', () => {

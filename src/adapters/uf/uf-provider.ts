@@ -1,6 +1,6 @@
 // src/adapters/uf/uf-provider.ts
 import * as cheerio from 'cheerio';
-import { conReintentos } from '../graph/reintentos.js';
+import { conReintentos, HttpError, HTTP_TIMEOUT_MS } from '../graph/reintentos.js';
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 const UF_MIN = 10000;
@@ -46,7 +46,13 @@ export function parseUfHtml(html: string, fechaIso: string): number | null {
         .map((_, el) => $(el).text().trim())
         .get();
       if (Number(celdas[0]) === dia && celdas[col]) {
-        valor = parseMontoChileno(celdas[col] as string);
+        const encontrado = parseMontoChileno(celdas[col] as string);
+        if (valor !== null && valor !== encontrado) {
+          throw new Error(
+            `Valor UF ambiguo para ${fechaIso}: se encontraron ${valor} y ${encontrado} en la tabla`,
+          );
+        }
+        valor = encontrado;
       }
     });
   });
@@ -75,7 +81,9 @@ export class UfProvider {
 }
 
 async function descargarHtml(url: string): Promise<string> {
-  const respuesta = await fetch(url);
-  if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status} al consultar ${url}`);
+  const respuesta = await fetch(url, { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+  if (!respuesta.ok) {
+    throw new HttpError(respuesta.status, `HTTP ${respuesta.status} al consultar ${url}`);
+  }
   return respuesta.text();
 }
