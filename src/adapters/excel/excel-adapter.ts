@@ -22,9 +22,16 @@ export const ENCABEZADOS = {
 export type NombreTabla = keyof typeof ENCABEZADOS;
 export type FilaFacturasExcel = Record<(typeof ENCABEZADOS.tblFacturas)[number], string>;
 
+const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
+
 interface FilaGraph {
   index?: number;
   values: string[][];
+}
+
+interface PaginaFilas {
+  value: FilaGraph[];
+  '@odata.nextLink'?: string;
 }
 
 export class ExcelAdapter {
@@ -52,15 +59,31 @@ export class ExcelAdapter {
     return [...esperados];
   }
 
+  /** Lee todas las filas de la tabla siguiendo @odata.nextLink hasta agotar las páginas. */
+  private async leerFilas(tabla: NombreTabla): Promise<FilaGraph[]> {
+    const acumuladas: FilaGraph[] = [];
+    let ruta: string | undefined = `${this.base()}/tables/${tabla}/rows`;
+    while (ruta !== undefined) {
+      const pagina: PaginaFilas = await this.graph.solicitar<PaginaFilas>('GET', ruta);
+      acumuladas.push(...pagina.value);
+      const enlace = pagina['@odata.nextLink'];
+      // El nextLink de Graph es absoluto; GraphClient antepone la base, así que se quita aquí.
+      ruta =
+        enlace === undefined
+          ? undefined
+          : enlace.startsWith(GRAPH_BASE)
+            ? enlace.slice(GRAPH_BASE.length)
+            : enlace;
+    }
+    return acumuladas;
+  }
+
   async leerTabla(tabla: string): Promise<Record<string, string>[]> {
     if (!(tabla in ENCABEZADOS)) throw new Error(`Nombre de tabla no autorizado: ${tabla}`);
     const nombre = tabla as NombreTabla;
     const encabezados = await this.validarEncabezados(nombre);
-    const filas = await this.graph.solicitar<{ value: FilaGraph[] }>(
-      'GET',
-      `${this.base()}/tables/${nombre}/rows`,
-    );
-    return filas.value.map((fila) => {
+    const filas = await this.leerFilas(nombre);
+    return filas.map((fila) => {
       const valores = fila.values[0] ?? [];
       const objeto: Record<string, string> = {};
       encabezados.forEach((clave, i) => {
@@ -79,18 +102,25 @@ export class ExcelAdapter {
 
   async actualizarFilaFacturas(facturaId: string, cambios: Partial<FilaFacturasExcel>): Promise<void> {
     await this.validarEncabezados('tblFacturas');
-    const filas = await this.graph.solicitar<{ value: FilaGraph[] }>(
-      'GET',
-      `${this.base()}/tables/tblFacturas/rows`,
-    );
-    const indice = filas.value.findIndex((f) => (f.values[0] ?? [])[0] === facturaId);
-    if (indice === -1) throw new Error(`Fila no encontrada en tblFacturas: ${facturaId}`);
-    const actuales = [...(filas.value[indice]!.values[0] ?? [])].map((v) => (v == null ? '' : String(v)));
+    const filas = await this.leerFilas('tblFacturas');
+    const fila = filas.find((f) => (f.values[0] ?? [])[0] === facturaId);
+    if (!fila) throw new Error(`Fila no encontrada en tblFacturas: ${facturaId}`);
+    if (fila.index === undefined) {
+      throw new Error(`La fila de ${facturaId} en tblFacturas no trae índice de Graph`);
+    }
+    const rutaFila = `${this.base()}/tables/tblFacturas/rows/itemAt(index=${fila.index})`;
+    // Relectura inmediata antes del PATCH: la fila pudo moverse o cambiar entre lecturas.
+    const releida = await this.graph.solicitar<FilaGraph>('GET', rutaFila);
+    const actuales = (releida.values[0] ?? []).map((v) => (v == null ? '' : String(v)));
+    if (actuales[0] !== facturaId) {
+      throw new Error(
+        `La fila con índice ${fila.index} de tblFacturas cambió de forma concurrente: ` +
+          `se esperaba ${facturaId} y ahora contiene ${actuales[0] ?? '(vacío)'}`,
+      );
+    }
     ENCABEZADOS.tblFacturas.forEach((clave, i) => {
       if (cambios[clave] !== undefined) actuales[i] = cambios[clave] as string;
     });
-    await this.graph.solicitar('PATCH', `${this.base()}/tables/tblFacturas/rows/itemAt(index=${indice})`, {
-      values: [actuales],
-    });
+    await this.graph.solicitar('PATCH', rutaFila, { values: [actuales] });
   }
 }

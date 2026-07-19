@@ -46,6 +46,23 @@ describe('MailService.enviarFactura', () => {
     expect((cuerpo as { saveToSentItems: boolean }).saveToSentItems).toBe(true);
   });
 
+  it('rechaza un adjunto que supera el tamaño máximo permitido', async () => {
+    const graph = { solicitar: vi.fn() } as unknown as IGraphClient;
+    const servicio = new MailService(graph, 'buzon@empresa.cl');
+    const dir = mkdtempSync(join(tmpdir(), 'correo-'));
+    const rutaGrande = join(dir, 'grande.pdf');
+    writeFileSync(
+      rutaGrande,
+      Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(3 * 1024 * 1024, 0x20)]),
+    );
+    await expect(
+      servicio.enviarFactura({
+        remitente: 'f@e.cl', destinatarios: ['a@b.cl'], copia: [],
+        asunto: 'x', cuerpo: 'x', rutaPdf: rutaGrande,
+      }),
+    ).rejects.toThrow(/adjunto/i);
+  });
+
   it('rechaza adjuntar un archivo que no es PDF', async () => {
     const graph = { solicitar: vi.fn() } as unknown as IGraphClient;
     const servicio = new MailService(graph, 'buzon@empresa.cl');
