@@ -105,7 +105,7 @@ export async function ejecutarPreviewSii(deps: Dependencias, facturaId: string):
   const preview = await deps.sii.extraerPreview(payload);
   if (!preview.coinciden) {
     deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
-    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
+    await reflejarErrorEnExcel(deps, facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
     throw new Error(`Los totales del SII no coinciden: ${preview.diferencias.join(' | ')}`);
   }
   logger.info({ facturaId, totales: preview.totales }, 'vista previa SII coincide; detenido antes de emitir');
@@ -148,9 +148,6 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   }
   if (hashPayload(payload) !== filaFresca.payload_hash) {
     throw new Error('El payload cambió durante la aprobación; no se emite');
-  }
-  if (!deps.aprobacion.hashVigente(payload, filaFresca.payload_hash)) {
-    throw new Error('El hash aprobado no coincide con el payload vigente; no se emite');
   }
   deps.store.registrarAprobacion(facturaId, aprobacion.actor, filaFresca.payload_hash, aprobacion.fecha);
   deps.store.registrarTransicion(facturaId, 'APROBADA', `aprobada por ${aprobacion.actor}`);

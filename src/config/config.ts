@@ -27,7 +27,7 @@ export async function cargarConfig(raizProyecto: string): Promise<Config> {
   try {
     crudo = await readFile(ruta, 'utf8');
   } catch {
-    throw new Error(`No existe ${ruta}. Ejecute: pnpm agent -- setup`);
+    throw new Error(`No existe ${ruta}. Ejecute: pnpm agent setup`);
   }
   return esquemaConfig.parse(JSON.parse(crudo));
 }
