@@ -84,4 +84,22 @@ describe('redactarValor', () => {
     expect(redactarValor(null)).toBeNull();
     expect(redactarValor(true)).toBe(true);
   });
+
+  it('redacta el mensaje y el stack de instancias de Error', () => {
+    const error = new Error('fallo con RUT 12.345.678-5 y correo pagos@cliente.cl');
+    const salida = redactarValor(error) as { name: string; message: string; stack?: string };
+    expect(salida.name).toBe('Error');
+    expect(salida.message).not.toContain('12.345.678-5');
+    expect(salida.message).not.toContain('pagos@cliente.cl');
+    expect(salida.message).toContain('***-*');
+    if (error.stack) {
+      expect(salida.stack).not.toContain('12.345.678-5');
+    }
+  });
+
+  it('redacta errores anidados dentro de objetos', () => {
+    const entrada = { err: new Error('rut 12345678-5 inválido') };
+    const salida = redactarValor(entrada) as { err: { message: string } };
+    expect(salida.err.message).not.toContain('12345678-5');
+  });
 });

@@ -24,6 +24,16 @@ export function redactarValor(
   if (vistos.has(valor)) return '[CIRCULAR]';
   if (profundidad >= PROFUNDIDAD_MAXIMA) return valor;
   vistos.add(valor);
+  // Caso especial: las instancias de Error no son objetos planos, así que la
+  // rama de "prototipo distinto" de abajo las dejaría pasar intactas —
+  // filtrando RUTs, correos o tokens que hayan quedado en message/stack.
+  if (valor instanceof Error) {
+    return {
+      name: valor.name,
+      message: redactarTexto(valor.message),
+      stack: valor.stack ? redactarTexto(valor.stack) : undefined,
+    };
+  }
   if (Array.isArray(valor)) {
     return valor.map((v) => redactarValor(v, profundidad + 1, vistos));
   }

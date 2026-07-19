@@ -1,0 +1,227 @@
+// src/cli/comandos.ts
+import { hashPayload } from '../domain/hash.js';
+import { agruparCobros } from '../domain/agrupacion.js';
+import { construirPayload, type ClasificacionEmisor } from '../domain/motor.js';
+import { esquemaCliente, esquemaCobro, esquemaEmpresa } from '../domain/validacion.js';
+import type { InvoicePayload } from '../domain/tipos.js';
+import type { ExcelAdapter } from '../adapters/excel/excel-adapter.js';
+import type { UfProvider } from '../adapters/uf/uf-provider.js';
+import { EmisionConfirmadaSinPdfError, type ISiiAdapter } from '../adapters/sii/sii-adapter.js';
+import type { MailService } from '../services/correo.js';
+import type { ApprovalService } from '../services/aprobacion.js';
+import { guardarPdf, rutaFactura } from '../services/storage.js';
+import { filaExcelDesdePayload } from '../store/facturas-repository.js';
+import type { AuditStore } from '../store/audit-store.js';
+import { logger } from '../services/logger.js';
+
+export interface Dependencias {
+  store: AuditStore;
+  excel: ExcelAdapter;
+  uf: UfProvider;
+  sii: ISiiAdapter;
+  correo: MailService;
+  aprobacion: ApprovalService;
+  clasificaciones: Record<string, ClasificacionEmisor>;
+  rutaRaizClientes: string;
+  hoy: () => string;
+}
+
+export interface ResultadoPrepare {
+  preparadas: string[];
+  omitidas: string[];
+  bloqueadas: string[];
+  atrasadas: string[];
+}
+
+export async function ejecutarPrepare(deps: Dependencias, fecha?: string): Promise<ResultadoPrepare> {
+  const fechaObjetivo = fecha ?? deps.hoy();
+  const empresas = (await deps.excel.leerTabla('tblEmpresas')).map((f) => esquemaEmpresa.parse(f));
+  const clientes = (await deps.excel.leerTabla('tblClientes')).map((f) => esquemaCliente.parse(f));
+  const cobros = (await deps.excel.leerTabla('tblCobrosRecurrentes')).map((f) => esquemaCobro.parse(f));
+
+  const { grupos, bloqueados, atrasados } = agruparCobros(cobros, fechaObjetivo, deps.hoy());
+  const resultado: ResultadoPrepare = {
+    preparadas: [],
+    omitidas: [],
+    bloqueadas: bloqueados.map((b) => `${b.empresaId}/${b.clienteId}: ${b.motivo}`),
+    atrasadas: atrasados.map((a) => `${a.empresaId}/${a.clienteId}: ${a.motivo}`),
+  };
+
+  for (const grupo of grupos) {
+    if (deps.store.obtenerFactura(grupo.clave)) {
+      resultado.omitidas.push(grupo.clave);
+      continue;
+    }
+    const empresa = empresas.find((e) => e.empresa_id === grupo.empresaId && e.activo);
+    const cliente = clientes.find((c) => c.cliente_id === grupo.clienteId && c.activo);
+    const clasificacion = deps.clasificaciones[grupo.empresaId];
+    if (!empresa || !cliente || !clasificacion) {
+      throw new Error(`Datos maestros incompletos para el grupo ${grupo.clave}`);
+    }
+    const requiereUf = grupo.cobros.some((c) => c.moneda === 'UF');
+    const valorUf = requiereUf ? (await deps.uf.obtenerValorUf(grupo.fechaProgramada)).valor : null;
+    const payload = construirPayload(grupo, empresa, cliente, clasificacion, valorUf);
+    deps.store.crearFactura(payload, hashPayload(payload));
+    deps.store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparación en simulación');
+    await deps.excel.agregarFilaFacturas(filaExcelDesdePayload(payload, 'PENDIENTE_APROBACION'));
+    resultado.preparadas.push(payload.factura_id);
+  }
+
+  logger.info({ resultado }, 'prepare completado');
+  return resultado;
+}
+
+function payloadDesdeStore(deps: Dependencias, facturaId: string): InvoicePayload {
+  const fila = deps.store.obtenerFactura(facturaId);
+  if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
+  return JSON.parse(fila.payload_json) as InvoicePayload;
+}
+
+export async function ejecutarPreviewSii(deps: Dependencias, facturaId: string): Promise<void> {
+  const fila = deps.store.obtenerFactura(facturaId);
+  if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
+  const payload = payloadDesdeStore(deps, facturaId);
+  if (hashPayload(payload) !== fila.payload_hash) {
+    throw new Error('El payload cambió desde la preparación; regenerar con prepare');
+  }
+  await deps.sii.abrirYPreparar(payload);
+  const preview = await deps.sii.extraerPreview(payload);
+  if (!preview.coinciden) {
+    deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
+    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
+    throw new Error(`Los totales del SII no coinciden: ${preview.diferencias.join(' | ')}`);
+  }
+  logger.info({ facturaId, totales: preview.totales }, 'vista previa SII coincide; detenido antes de emitir');
+}
+
+export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promise<void> {
+  const fila = deps.store.obtenerFactura(facturaId);
+  if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
+  if (fila.estado !== 'PENDIENTE_APROBACION') {
+    throw new Error(`La factura está en ${fila.estado}; emit exige PENDIENTE_APROBACION`);
+  }
+  const payload = payloadDesdeStore(deps, facturaId);
+  if (hashPayload(payload) !== fila.payload_hash) {
+    throw new Error('El payload cambió desde la preparación; regenerar con prepare');
+  }
+
+  const carpeta = payload.nombre_carpeta;
+  const rutaPrevista = rutaFactura(deps.rutaRaizClientes, carpeta, payload.fecha_emision, 'PENDIENTE', carpeta);
+
+  await deps.sii.abrirYPreparar(payload);
+  const preview = await deps.sii.extraerPreview(payload);
+  if (!preview.coinciden) {
+    deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
+    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
+    throw new Error(`Los totales del SII no coinciden; REQUIERE_REVISION: ${preview.diferencias.join(' | ')}`);
+  }
+
+  const aprobacion = await deps.aprobacion.solicitarAprobacion(payload, rutaPrevista);
+  if (!aprobacion.aprobada) {
+    throw new Error('Aprobación denegada o texto incorrecto; no se emite');
+  }
+  if (!deps.aprobacion.hashVigente(payload, fila.payload_hash)) {
+    throw new Error('El hash aprobado no coincide con el payload vigente; no se emite');
+  }
+  deps.store.registrarAprobacion(facturaId, aprobacion.actor, fila.payload_hash, aprobacion.fecha);
+  deps.store.registrarTransicion(facturaId, 'APROBADA', `aprobada por ${aprobacion.actor}`);
+  deps.store.registrarTransicion(facturaId, 'EMITIENDO', 'única acción de emisión');
+
+  let emision;
+  try {
+    emision = await deps.sii.emitirUnaVez();
+  } catch (error) {
+    // Deviación autorizada respecto al plan original: si la emisión fue
+    // CONFIRMADA por el SII (hay folio) pero falló solo la descarga del PDF,
+    // NO es una respuesta incierta. El folio se preserva y la factura queda
+    // en ERROR_REINTENTABLE (EMITIDA -> ERROR_REINTENTABLE es transición
+    // legal) para que únicamente `retry-email`/descarga manual la retomen;
+    // jamás debe volver a pasar por `emitirUnaVez`.
+    if (error instanceof EmisionConfirmadaSinPdfError) {
+      const detalle = `PDF pendiente: ${error.message}`;
+      deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${error.folio}`);
+      deps.store.guardarFolio(facturaId, error.folio);
+      deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', detalle);
+      await deps.excel.actualizarFilaFacturas(facturaId, {
+        estado: 'ERROR_REINTENTABLE', folio_sii: error.folio, error: detalle,
+      });
+      throw error;
+    }
+
+    // Respuesta incierta: consultar documentos emitidos antes de permitir otra acción (diseño §5 SiiAdapter).
+    const folioExistente = await deps.sii.consultarDocumentosEmitidos(payload.rut_cliente, payload.fecha_emision);
+    const detalle = folioExistente
+      ? `emisión incierta; documentos emitidos muestra folio ${folioExistente}`
+      : `emisión incierta sin folio visible: ${(error as Error).message}`;
+    deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', detalle);
+    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'REQUIERE_REVISION', error: detalle });
+    throw new Error(detalle);
+  }
+
+  deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${emision.folio}`);
+  deps.store.guardarFolio(facturaId, emision.folio);
+
+  const rutaFinal = rutaFactura(deps.rutaRaizClientes, carpeta, payload.fecha_emision, emision.folio, carpeta);
+  try {
+    await guardarPdf(rutaFinal, emision.pdf);
+  } catch (error) {
+    deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `PDF: ${(error as Error).message}`);
+    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, error: (error as Error).message });
+    throw error;
+  }
+  deps.store.guardarRutaPdf(facturaId, rutaFinal);
+  deps.store.registrarTransicion(facturaId, 'DESCARGADA', rutaFinal);
+
+  try {
+    await deps.correo.enviarFactura({
+      remitente: payload.remitente,
+      destinatarios: payload.destinatarios,
+      copia: payload.copia,
+      asunto: `Factura ${emision.folio} — ${payload.razon_social_emisor} — ${payload.periodo}`,
+      cuerpo: `Estimados,\n\nAdjuntamos la factura electrónica N° ${emision.folio} correspondiente al período ${payload.periodo}.\n\nSaludos,\n${payload.razon_social_emisor}`,
+      rutaPdf: rutaFinal,
+    });
+    deps.store.registrarIntentoCorreo(facturaId, true, 'enviado');
+  } catch (error) {
+    deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
+    deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `correo: ${(error as Error).message}`);
+    await deps.excel.actualizarFilaFacturas(facturaId, {
+      estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, pdf_path: rutaFinal, error: (error as Error).message,
+    });
+    throw error;
+  }
+  deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado');
+  await deps.excel.actualizarFilaFacturas(facturaId, {
+    estado: 'ENVIADA', folio_sii: emision.folio, pdf_path: rutaFinal,
+    aprobada_por: aprobacion.actor, fecha_aprobacion: aprobacion.fecha,
+    fecha_envio: new Date().toISOString(), error: '',
+  });
+}
+
+export async function ejecutarRetryEmail(deps: Dependencias, facturaId: string): Promise<void> {
+  const fila = deps.store.obtenerFactura(facturaId);
+  if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
+  if (!fila.folio_sii || !fila.pdf_path) {
+    throw new Error('retry-email exige folio y PDF verificado; no invoca SiiAdapter');
+  }
+  if (fila.estado !== 'ERROR_REINTENTABLE' && fila.estado !== 'DESCARGADA') {
+    throw new Error(`retry-email no aplica en estado ${fila.estado}`);
+  }
+  const payload = payloadDesdeStore(deps, facturaId);
+  try {
+    await deps.correo.enviarFactura({
+      remitente: payload.remitente,
+      destinatarios: payload.destinatarios,
+      copia: payload.copia,
+      asunto: `Factura ${fila.folio_sii} — ${payload.razon_social_emisor} — ${payload.periodo}`,
+      cuerpo: `Estimados,\n\nAdjuntamos la factura electrónica N° ${fila.folio_sii} correspondiente al período ${payload.periodo}.\n\nSaludos,\n${payload.razon_social_emisor}`,
+      rutaPdf: fila.pdf_path,
+    });
+    deps.store.registrarIntentoCorreo(facturaId, true, 'reintento exitoso');
+    deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado en reintento');
+    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'ENVIADA', fecha_envio: new Date().toISOString(), error: '' });
+  } catch (error) {
+    deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
+    throw error;
+  }
+}
