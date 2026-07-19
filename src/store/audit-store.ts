@@ -96,7 +96,16 @@ export class AuditStore {
         .prepare(`INSERT INTO state_events (factura_id, desde, hacia, detalle) VALUES (?, NULL, 'BORRADOR', 'creación')`)
         .run(payload.factura_id);
     });
-    tx();
+    try {
+      tx();
+    } catch (error) {
+      // Respaldo de la PK: si otro proceso insertó la fila entre el pre-chequeo
+      // y el INSERT, se normaliza al mismo error amistoso de idempotencia.
+      if (error instanceof Error && /UNIQUE constraint failed: invoice_runs\.factura_id/.test(error.message)) {
+        throw new Error(`La factura ${payload.factura_id} ya existe (idempotencia)`);
+      }
+      throw error;
+    }
   }
 
   obtenerFactura(facturaId: string): FilaFactura | undefined {
@@ -116,7 +125,15 @@ export class AuditStore {
     if (!actual) throw new Error(`Factura no encontrada: ${facturaId}`);
     assertTransicion(actual.estado, hacia);
     const tx = this.db.transaction(() => {
-      this.db.prepare('UPDATE invoice_runs SET estado = ? WHERE factura_id = ?').run(hacia, facturaId);
+      // Compare-and-swap: solo actualiza si el estado sigue siendo el leído.
+      const result = this.db
+        .prepare('UPDATE invoice_runs SET estado = ? WHERE factura_id = ? AND estado = ?')
+        .run(hacia, facturaId, actual.estado);
+      if (result.changes !== 1) {
+        throw new Error(
+          `Transición rechazada: el estado cambió de forma concurrente (se leyó ${actual.estado} para ${facturaId})`,
+        );
+      }
       this.db
         .prepare('INSERT INTO state_events (factura_id, desde, hacia, detalle) VALUES (?, ?, ?, ?)')
         .run(facturaId, actual.estado, hacia, detalle);

@@ -1,5 +1,5 @@
 // src/services/storage.ts
-import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 
 export function sanitizarNombreCarpeta(nombre: string): string {
@@ -20,6 +20,9 @@ export function rutaFactura(
   cliente: string,
 ): string {
   const carpeta = sanitizarNombreCarpeta(nombreCarpeta);
+  if (!/^[A-Za-z0-9-]+$/.test(folio)) {
+    throw new Error(`folio inválido: "${folio}" (solo se permite [A-Za-z0-9-])`);
+  }
   const [anio, mes] = [fechaEmision.slice(0, 4), fechaEmision.slice(5, 7)];
   const periodo = `${anio}-${mes}`;
   const nombre = `Factura_${folio}_${sanitizarNombreCarpeta(cliente)}_${periodo}.pdf`;
@@ -38,10 +41,16 @@ export async function guardarPdf(destino: string, datos: Buffer): Promise<void> 
   }
   await mkdir(dirname(destino), { recursive: true });
   const temporal = `${destino}.tmp-${process.pid}`;
-  await writeFile(temporal, datos);
-  const info = await stat(temporal);
-  if (info.size !== datos.length || info.size === 0) {
-    throw new Error('Verificación de tamaño del PDF falló');
+  try {
+    await writeFile(temporal, datos);
+    const info = await stat(temporal);
+    if (info.size !== datos.length || info.size === 0) {
+      throw new Error('Verificación de tamaño del PDF falló');
+    }
+    await rename(temporal, destino);
+  } catch (error) {
+    // No dejar temporales huérfanos; el error de limpieza se ignora a propósito.
+    await unlink(temporal).catch(() => undefined);
+    throw error;
   }
-  await rename(temporal, destino);
 }

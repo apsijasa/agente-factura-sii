@@ -1,5 +1,5 @@
 // tests/store/audit-store.test.ts
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AuditStore } from '../../src/store/audit-store.js';
 import type { InvoicePayload } from '../../src/domain/tipos.js';
 
@@ -82,6 +82,35 @@ describe('AuditStore', () => {
     store.registrarIntentoCorreo(payload.factura_id, false, 'alias rechazado');
     expect(store.obtenerAprobacion(payload.factura_id)?.actor).toBe('andres');
     expect(store.obtenerIntentosCorreo(payload.factura_id)).toHaveLength(1);
+  });
+
+  it('rechaza la transición si el estado cambió de forma concurrente (CAS)', () => {
+    const store = crearStore();
+    store.crearFactura(payload, 'hash-abc');
+    const filaObsoleta = store.obtenerFactura(payload.factura_id);
+    if (!filaObsoleta) throw new Error('fila no encontrada');
+    // Otro proceso cambia el estado directamente en la base de datos.
+    const db = (store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db;
+    db.prepare('UPDATE invoice_runs SET estado = ? WHERE factura_id = ?').run('CANCELADA', payload.factura_id);
+    // Se fuerza la lectura obsoleta (el estado real ya es CANCELADA).
+    vi.spyOn(store, 'obtenerFactura').mockReturnValueOnce(filaObsoleta);
+    expect(() =>
+      store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'carrera'),
+    ).toThrow(/concurrente|estado cambió/);
+    // Sin evento nuevo: solo el de creación.
+    expect(store.obtenerEventos(payload.factura_id)).toHaveLength(1);
+  });
+
+  it('normaliza el error de clave primaria cuando el pre-chequeo se elude (carrera)', () => {
+    const store = crearStore();
+    // Otro proceso inserta la fila directamente en la base de datos.
+    const db = (store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db;
+    db.prepare(
+      `INSERT INTO invoice_runs (factura_id, estado, payload_json, payload_hash) VALUES (?, 'BORRADOR', '{}', 'h')`,
+    ).run(payload.factura_id);
+    // Se simula la carrera: el pre-chequeo no ve la fila y el INSERT choca con la PK.
+    vi.spyOn(store, 'obtenerFactura').mockReturnValueOnce(undefined);
+    expect(() => store.crearFactura(payload, 'hash-abc')).toThrow(/existe/i);
   });
 
   it('guarda folio y ruta del PDF', () => {

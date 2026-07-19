@@ -1,5 +1,5 @@
 // tests/services/storage.test.ts
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,15 @@ describe('rutaFactura', () => {
   it('rechaza rutas que escapan de la raíz autorizada', () => {
     expect(() => rutaFactura('/raiz/cliente', '..', '2026-07-05', '1', 'X')).toThrow();
   });
+  it('rechaza folios con caracteres fuera de [A-Za-z0-9-]', () => {
+    expect(() => rutaFactura('/raiz/cliente', 'NCA', '2026-07-05', '../etc', 'NCA')).toThrow(/folio/);
+    expect(() => rutaFactura('/raiz/cliente', 'NCA', '2026-07-05', '12 34', 'NCA')).toThrow(/folio/);
+  });
+  it('acepta el folio placeholder PENDIENTE', () => {
+    expect(rutaFactura('/raiz/cliente', 'NCA', '2026-07-05', 'PENDIENTE', 'NCA')).toBe(
+      '/raiz/cliente/NCA/2026/07/Factura_PENDIENTE_NCA_2026-07.pdf',
+    );
+  });
 });
 
 describe('guardarPdf', () => {
@@ -38,6 +47,15 @@ describe('guardarPdf', () => {
     const destino = join(raiz, 'sub', 'Factura_1_X_2026-07.pdf');
     await guardarPdf(destino, PDF_MINIMO);
     expect(readFileSync(destino).toString()).toContain('%PDF');
+  });
+  it('elimina el archivo temporal si la escritura falla', async () => {
+    const raiz = mkdtempSync(join(tmpdir(), 'storage-'));
+    const destino = join(raiz, 'ocupado.pdf');
+    // Un DIRECTORIO ocupa el destino: writeFile del temporal funciona, rename falla.
+    mkdirSync(destino);
+    await expect(guardarPdf(destino, PDF_MINIMO)).rejects.toThrow();
+    const restos = readdirSync(raiz).filter((n) => n.includes('.tmp-'));
+    expect(restos).toEqual([]);
   });
   it('rechaza contenido que no es PDF o está vacío', async () => {
     const raiz = mkdtempSync(join(tmpdir(), 'storage-'));
