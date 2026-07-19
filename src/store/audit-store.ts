@@ -108,6 +108,11 @@ export class AuditStore {
     }
   }
 
+  listarFacturaIds(): string[] {
+    return (this.db.prepare('SELECT factura_id FROM invoice_runs ORDER BY factura_id').all() as { factura_id: string }[])
+      .map((f) => f.factura_id);
+  }
+
   obtenerFactura(facturaId: string): FilaFactura | undefined {
     return this.db.prepare('SELECT * FROM invoice_runs WHERE factura_id = ?').get(facturaId) as
       | FilaFactura
