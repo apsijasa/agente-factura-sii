@@ -10,15 +10,25 @@ export interface ResultadoPreflight {
   fallas: string[];
 }
 
+export interface OpcionesPreflight {
+  verificarGraph: boolean;
+  leerSecreto?: (cuenta: string) => Promise<string>;
+}
+
 export async function preflight(
   config: Config,
   graph: IGraphClient,
   rutEmisor: string,
-  opciones: { verificarGraph: boolean },
+  opciones: OpcionesPreflight,
 ): Promise<ResultadoPreflight> {
   const fallas: string[] = [];
+  const leerSecreto = opciones.leerSecreto ?? leerSecretoKeychain;
 
-  await mkdir(join(config.rutaDatos, 'evidence'), { recursive: true });
+  try {
+    await mkdir(join(config.rutaDatos, 'evidence'), { recursive: true });
+  } catch (e) {
+    fallas.push(`No se pudo crear el directorio de datos ${config.rutaDatos}: ${(e as Error).message}`);
+  }
   try {
     await access(config.rutaRaizClientes);
   } catch {
@@ -26,7 +36,7 @@ export async function preflight(
   }
 
   try {
-    await leerSecretoKeychain(rutEmisor);
+    await leerSecreto(rutEmisor);
   } catch (e) {
     fallas.push((e as Error).message);
   }

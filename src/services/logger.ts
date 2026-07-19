@@ -1,9 +1,11 @@
 // src/services/logger.ts
 import pino from 'pino';
 
-const RE_RUT = /\b\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]\b/g;
+const RE_RUT = /\b\d{1,3}(?:\.?\d{3}){1,2}-[\dkK]\b/g;
 const RE_CORREO = /[^\s@;"']+@[^\s@;"']+\.[^\s@;"']+/g;
 const RE_TOKEN = /\b(eyJ[\w-]+\.[\w-]+\.[\w-]+|Bearer\s+\S+)\b/g;
+
+const PROFUNDIDAD_MAXIMA = 6;
 
 export function redactarTexto(texto: string): string {
   return texto
@@ -12,13 +14,42 @@ export function redactarTexto(texto: string): string {
     .replace(RE_CORREO, (m) => `${m.slice(0, 2)}***@***`);
 }
 
+export function redactarValor(
+  valor: unknown,
+  profundidad = 0,
+  vistos = new WeakSet<object>(),
+): unknown {
+  if (typeof valor === 'string') return redactarTexto(valor);
+  if (valor === null || typeof valor !== 'object') return valor;
+  if (vistos.has(valor)) return '[CIRCULAR]';
+  if (profundidad >= PROFUNDIDAD_MAXIMA) return valor;
+  vistos.add(valor);
+  if (Array.isArray(valor)) {
+    return valor.map((v) => redactarValor(v, profundidad + 1, vistos));
+  }
+  const prototipo = Object.getPrototypeOf(valor);
+  if (prototipo !== Object.prototype && prototipo !== null) return valor;
+  const salida: Record<string, unknown> = {};
+  for (const [clave, v] of Object.entries(valor)) {
+    salida[clave] = redactarValor(v, profundidad + 1, vistos);
+  }
+  return salida;
+}
+
 export const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
   hooks: {
     logMethod(args, metodo) {
-      const saneados = args.map((a) => (typeof a === 'string' ? redactarTexto(a) : a));
+      const saneados = args.map((a) => redactarValor(a));
       metodo.apply(this, saneados as Parameters<typeof metodo>);
     },
   },
-  redact: { paths: ['password', 'token', 'authorization', 'cookie', '*.password', '*.token'], censor: '[REDACTADO]' },
+  redact: {
+    paths: [
+      'password', 'token', 'authorization', 'cookie', '*.password', '*.token',
+      'rut_emisor', 'rut_cliente', 'email_remitente', 'email_copia', 'email_facturacion',
+      'destinatarios', 'copia', 'remitente', '*.rut_emisor', '*.rut_cliente',
+    ],
+    censor: '[REDACTADO]',
+  },
 });
