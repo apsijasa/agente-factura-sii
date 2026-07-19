@@ -1,0 +1,33 @@
+// src/config/config.ts
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { z } from 'zod';
+
+export const esquemaConfig = z.object({
+  tenantId: z.string().min(1),
+  clientId: z.string().min(1),
+  buzonPrincipal: z.string().email(),
+  driveId: z.string().min(1),
+  itemId: z.string().min(1),
+  rutaRaizClientes: z.string().min(1),
+  rutaDatos: z.string().min(1).default('.data'),
+  timeoutSiiMs: z.number().int().positive().default(120000),
+  timeoutAprobacionMs: z.number().int().positive().default(300000),
+  modoPredeterminado: z.literal('simulation'),
+  emisores: z
+    .record(z.object({ tipoVenta: z.string().min(1), tipoCompra: z.string().min(1) }))
+    .refine((e) => Object.keys(e).length > 0, 'Debe configurarse al menos un emisor'),
+});
+
+export type Config = z.output<typeof esquemaConfig>;
+
+export async function cargarConfig(raizProyecto: string): Promise<Config> {
+  const ruta = join(raizProyecto, '.data', 'config.json');
+  let crudo: string;
+  try {
+    crudo = await readFile(ruta, 'utf8');
+  } catch {
+    throw new Error(`No existe ${ruta}. Ejecute: pnpm agent setup`);
+  }
+  return esquemaConfig.parse(JSON.parse(crudo));
+}
