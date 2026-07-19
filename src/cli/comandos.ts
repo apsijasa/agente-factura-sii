@@ -71,6 +71,23 @@ export async function ejecutarPrepare(deps: Dependencias, fecha?: string): Promi
   return resultado;
 }
 
+/**
+ * Refleja cambios en Excel dentro de una rama de error SIN enmascarar el
+ * error original: si Excel falla, se registra una advertencia (redactada por
+ * el hook del logger) y el flujo continúa hacia el rethrow del error real.
+ */
+async function reflejarErrorEnExcel(
+  deps: Dependencias,
+  facturaId: string,
+  cambios: Parameters<ExcelAdapter['actualizarFilaFacturas']>[1],
+): Promise<void> {
+  try {
+    await deps.excel.actualizarFilaFacturas(facturaId, cambios);
+  } catch (error) {
+    logger.warn(`No se pudo reflejar ${facturaId} en Excel: ${(error as Error).message}`);
+  }
+}
+
 function payloadDesdeStore(deps: Dependencias, facturaId: string): InvoicePayload {
   const fila = deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
@@ -112,7 +129,7 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   const preview = await deps.sii.extraerPreview(payload);
   if (!preview.coinciden) {
     deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
-    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
+    await reflejarErrorEnExcel(deps, facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
     throw new Error(`Los totales del SII no coinciden; REQUIERE_REVISION: ${preview.diferencias.join(' | ')}`);
   }
 
@@ -120,10 +137,22 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   if (!aprobacion.aprobada) {
     throw new Error('Aprobación denegada o texto incorrecto; no se emite');
   }
-  if (!deps.aprobacion.hashVigente(payload, fila.payload_hash)) {
+  // Guarda TOCTOU: la aprobación humana puede tardar minutos; se relee la fila
+  // y se verifica que nada cambió entre la aprobación y la emisión.
+  const filaFresca = deps.store.obtenerFactura(facturaId);
+  if (!filaFresca) {
+    throw new Error(`La factura ${facturaId} desapareció durante la aprobación; no se emite`);
+  }
+  if (filaFresca.estado !== 'PENDIENTE_APROBACION') {
+    throw new Error(`La factura cambió a ${filaFresca.estado} durante la aprobación; no se emite`);
+  }
+  if (hashPayload(payload) !== filaFresca.payload_hash) {
+    throw new Error('El payload cambió durante la aprobación; no se emite');
+  }
+  if (!deps.aprobacion.hashVigente(payload, filaFresca.payload_hash)) {
     throw new Error('El hash aprobado no coincide con el payload vigente; no se emite');
   }
-  deps.store.registrarAprobacion(facturaId, aprobacion.actor, fila.payload_hash, aprobacion.fecha);
+  deps.store.registrarAprobacion(facturaId, aprobacion.actor, filaFresca.payload_hash, aprobacion.fecha);
   deps.store.registrarTransicion(facturaId, 'APROBADA', `aprobada por ${aprobacion.actor}`);
   deps.store.registrarTransicion(facturaId, 'EMITIENDO', 'única acción de emisión');
 
@@ -142,7 +171,7 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
       deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${error.folio}`);
       deps.store.guardarFolio(facturaId, error.folio);
       deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', detalle);
-      await deps.excel.actualizarFilaFacturas(facturaId, {
+      await reflejarErrorEnExcel(deps, facturaId, {
         estado: 'ERROR_REINTENTABLE', folio_sii: error.folio, error: detalle,
       });
       throw error;
@@ -153,8 +182,15 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
     const detalle = folioExistente
       ? `emisión incierta; documentos emitidos muestra folio ${folioExistente}`
       : `emisión incierta sin folio visible: ${(error as Error).message}`;
+    // El folio hallado se persiste ANTES de la transición terminal: es la única
+    // evidencia de que el documento existe y no puede perderse.
+    if (folioExistente) deps.store.guardarFolio(facturaId, folioExistente);
     deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', detalle);
-    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'REQUIERE_REVISION', error: detalle });
+    await reflejarErrorEnExcel(deps, facturaId, {
+      estado: 'REQUIERE_REVISION',
+      error: detalle,
+      ...(folioExistente ? { folio_sii: folioExistente } : {}),
+    });
     throw new Error(detalle);
   }
 
@@ -166,7 +202,7 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
     await guardarPdf(rutaFinal, emision.pdf);
   } catch (error) {
     deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `PDF: ${(error as Error).message}`);
-    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, error: (error as Error).message });
+    await reflejarErrorEnExcel(deps, facturaId, { estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, error: (error as Error).message });
     throw error;
   }
   deps.store.guardarRutaPdf(facturaId, rutaFinal);
@@ -185,7 +221,7 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   } catch (error) {
     deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
     deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `correo: ${(error as Error).message}`);
-    await deps.excel.actualizarFilaFacturas(facturaId, {
+    await reflejarErrorEnExcel(deps, facturaId, {
       estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, pdf_path: rutaFinal, error: (error as Error).message,
     });
     throw error;

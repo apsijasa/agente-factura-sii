@@ -176,6 +176,28 @@ export class AuditStore {
       .all(facturaId) as { exito: number; detalle: string }[];
   }
 
+  /**
+   * Recuperación de arranque: toda fila que quedó en EMITIENDO proviene de un
+   * proceso que cayó en plena emisión. El resultado en el SII es desconocido,
+   * así que se fuerza REQUIERE_REVISION (transición legal) para que ninguna
+   * ruta automática pueda volver a emitirla sin verificación humana.
+   */
+  marcarEmisionesInterrumpidas(): string[] {
+    const filas = this.db
+      .prepare(`SELECT factura_id FROM invoice_runs WHERE estado = 'EMITIENDO' ORDER BY factura_id`)
+      .all() as { factura_id: string }[];
+    const ids: string[] = [];
+    for (const { factura_id } of filas) {
+      this.registrarTransicion(
+        factura_id,
+        'REQUIERE_REVISION',
+        'emisión interrumpida por caída del proceso; verificar documentos emitidos en el SII antes de cualquier acción',
+      );
+      ids.push(factura_id);
+    }
+    return ids;
+  }
+
   guardarFolio(facturaId: string, folio: string): void {
     this.db.prepare('UPDATE invoice_runs SET folio_sii = ? WHERE factura_id = ?').run(folio, facturaId);
   }

@@ -113,6 +113,33 @@ describe('AuditStore', () => {
     expect(() => store.crearFactura(payload, 'hash-abc')).toThrow(/existe/i);
   });
 
+  it('marca las emisiones interrumpidas (EMITIENDO) como REQUIERE_REVISION', () => {
+    const store = crearStore();
+    store.crearFactura(payload, 'hash-abc');
+    store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparada');
+    store.registrarTransicion(payload.factura_id, 'APROBADA', 'aprobada');
+    store.registrarTransicion(payload.factura_id, 'EMITIENDO', 'emisión iniciada');
+    // Otra factura en estado no-EMITIENDO no debe ser tocada.
+    const otra = { ...payload, factura_id: 'RECURRENT:E1:CL2:2026-07' };
+    store.crearFactura(otra, 'hash-otra');
+    store.registrarTransicion(otra.factura_id, 'PENDIENTE_APROBACION', 'preparada');
+
+    const interrumpidas = store.marcarEmisionesInterrumpidas();
+
+    expect(interrumpidas).toEqual([payload.factura_id]);
+    expect(store.obtenerFactura(payload.factura_id)?.estado).toBe('REQUIERE_REVISION');
+    const ultimo = store.obtenerEventos(payload.factura_id).at(-1);
+    expect(ultimo?.detalle).toMatch(/interrumpida/i);
+    expect(store.obtenerFactura(otra.factura_id)?.estado).toBe('PENDIENTE_APROBACION');
+  });
+
+  it('marcarEmisionesInterrumpidas no hace nada si no hay filas en EMITIENDO', () => {
+    const store = crearStore();
+    store.crearFactura(payload, 'hash-abc');
+    expect(store.marcarEmisionesInterrumpidas()).toEqual([]);
+    expect(store.obtenerFactura(payload.factura_id)?.estado).toBe('BORRADOR');
+  });
+
   it('guarda folio y ruta del PDF', () => {
     const store = crearStore();
     store.crearFactura(payload, 'hash-abc');
