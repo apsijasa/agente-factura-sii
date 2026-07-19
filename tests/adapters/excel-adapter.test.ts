@@ -4,7 +4,7 @@ import { ENCABEZADOS, ExcelAdapter } from '../../src/adapters/excel/excel-adapte
 import type { IGraphClient } from '../../src/adapters/graph/graph-client.js';
 
 function graphFalso(respuestas: Record<string, unknown>): IGraphClient & { solicitar: ReturnType<typeof vi.fn> } {
-  const solicitar = vi.fn(async (_metodo: string, ruta: string, _cuerpo?: unknown) => {
+  const solicitar = vi.fn(async (_metodo: string, ruta: string) => {
     for (const [clave, valor] of Object.entries(respuestas)) {
       if (ruta.includes(clave)) return valor;
     }
