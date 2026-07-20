@@ -97,6 +97,13 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
         await pagina.goto(SELECTORES.urlEmisionFactura);
         if (/mipeSelEmpresa/i.test(pagina.url())) {
           console.log('Seleccione la empresa en la ventana del SII. El agente esperará…');
+          await pagina.waitForURL((url) => !/mipeSelEmpresa/i.test(url.toString()), {
+            timeout: this.opciones.timeoutMs,
+          });
+        }
+        // Si tras elegir empresa el portal deja en un menú, ir directo al formulario.
+        if (!/mipeGenFacEx/i.test(pagina.url())) {
+          await pagina.goto(SELECTORES.urlFormularioFactura);
         }
       }
     }
