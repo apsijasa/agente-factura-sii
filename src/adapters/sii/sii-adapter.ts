@@ -1,6 +1,6 @@
 // src/adapters/sii/sii-adapter.ts
 import { chromium, type Browser, type Page } from 'playwright';
-import { compararTotales, parseMontoChileno, type TotalesSii } from './parse.js';
+import { compararTotales, type TotalesSii } from './parse.js';
 import { SELECTORES } from './selectores.js';
 import type { InvoicePayload } from '../../domain/tipos.js';
 
@@ -178,19 +178,23 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
 
   async extraerPreview(payload: InvoicePayload): Promise<ResultadoPreview> {
     const pagina = await this.paginaActiva();
-    // Evidencia de la vista previa siempre, para calibrar la lectura de totales.
+    if (!SELECTORES.urlVistaPrevia.test(pagina.url())) {
+      throw new Error(`No estamos en la vista previa del SII (url actual: ${pagina.url()})`);
+    }
+    // Evidencia de la vista previa siempre, para auditoría y calibración.
     await this.guardarEvidencia(pagina, 'vista-previa');
-    const leerMonto = async (patron: RegExp): Promise<number> => {
-      const fila = pagina.getByText(patron).locator('xpath=ancestor::tr[1]');
-      const texto = (await fila.innerText()).replace(/\s+/g, ' ');
-      const m = /([\d.]+(?:,\d+)?)\s*$/.exec(texto.trim());
-      if (!m) throw new Error(`No se pudo leer el monto para ${patron}`);
-      return parseMontoChileno(m[1] as string);
+    // Los totales autoritativos del SII viajan como inputs ocultos de la página.
+    const leerMonto = async (selector: string): Promise<number> => {
+      const valor = (await pagina.locator(selector).inputValue()).trim();
+      if (!/^\d+$/.test(valor)) {
+        throw new Error(`Monto ilegible en ${selector}: "${valor}"`);
+      }
+      return Number(valor);
     };
     const totales: TotalesSii = {
-      netoClp: await leerMonto(SELECTORES.previewNeto.texto),
-      ivaClp: await leerMonto(SELECTORES.previewIva.texto),
-      totalClp: await leerMonto(SELECTORES.previewTotal.texto),
+      netoClp: await leerMonto(SELECTORES.previewNeto),
+      ivaClp: await leerMonto(SELECTORES.previewIva),
+      totalClp: await leerMonto(SELECTORES.previewTotal),
     };
     await pagina.screenshot({
       path: `${this.opciones.dirEvidencia}/preview-${payload.factura_id.replaceAll(':', '_')}.png`,
@@ -206,7 +210,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
   async emitirUnaVez(): Promise<ResultadoEmision> {
     const pagina = await this.paginaActiva();
     // ÚNICA acción de emisión. Sin reintentos automáticos (diseño §10).
-    await pagina.getByRole('button', { name: SELECTORES.botonEmitir.nombre }).click();
+    await pagina.locator(SELECTORES.botonEmitir).click();
 
     // Tras el clic de emisión NO se sabe si el SII procesó la solicitud:
     // cualquier fallo antes de confirmar el folio se etiqueta como incierto.

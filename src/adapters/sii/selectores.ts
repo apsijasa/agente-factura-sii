@@ -31,10 +31,13 @@ export const SELECTORES = {
   lineaPrecio: (fila: number) => `input[name="EFXP_PRC_${String(fila + 1).padStart(2, '0')}"]`,
   botonAgregarLinea: 'input[name="AGREGA_DETALLE"]',
   botonVistaPrevia: 'button[name="Button_Update"]',
-  previewNeto: { texto: /monto neto/i },
-  previewIva: { texto: /iva/i },
-  previewTotal: { texto: /total/i },
-  botonEmitir: { rol: 'button', nombre: /firmar y enviar|emitir/i },
+  // La página de vista previa (mipeDisplayPreView.cgi) muestra el DTE como PDF
+  // embebido, pero lleva los totales calculados por el SII como inputs ocultos.
+  previewNeto: 'input[name="EFXP_MNT_NETO"]',
+  previewIva: 'input[name="EFXP_IVA"]',
+  previewTotal: 'input[name="EFXP_MNT_TOTAL"]',
+  botonEmitir: 'input[name="btnSign"]', // "Firmar" — única acción de emisión
+  urlVistaPrevia: /mipeDisplayPreView/i,
   folioEnConfirmacion: /folio\s*n?[°º]?\s*(\d+)/i,
   enlacePdf: { rol: 'link', nombre: /ver documento|pdf/i },
   urlDocumentosEmitidos: 'https://www1.sii.cl/cgi-bin/Portal001/mipeDocsEmit.cgi',
