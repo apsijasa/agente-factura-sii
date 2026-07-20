@@ -81,7 +81,22 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       });
     }
     // Autenticado: ahora sí esperar el formulario de emisión.
-    await pagina.getByLabel(SELECTORES.campoRutReceptor.etiqueta).waitFor({ timeout: this.opciones.timeoutMs });
+    try {
+      await pagina.getByLabel(SELECTORES.campoRutReceptor.etiqueta).waitFor({ timeout: this.opciones.timeoutMs });
+    } catch (error) {
+      // Calibración: guardar evidencia local (captura + HTML) para ajustar selectores
+      // contra el formulario real. Solo queda en .data/evidence (fuera de Git).
+      const marca = Date.now();
+      const base = `${this.opciones.dirEvidencia}/form-no-detectado-${marca}`;
+      await pagina.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => undefined);
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(`${base}.html`, await pagina.content()).catch(() => undefined);
+      throw new Error(
+        `No se detectó el formulario de emisión (url actual: ${pagina.url()}). ` +
+          `Evidencia guardada en ${base}.png/.html — usarla para calibrar selectores. ` +
+          `Detalle: ${(error as Error).message.split('\n')[0]}`,
+      );
+    }
 
     await pagina.getByLabel(SELECTORES.campoRutReceptor.etiqueta).fill(payload.rut_cliente);
     await pagina.getByLabel(SELECTORES.tipoVenta.etiqueta).selectOption({ label: payload.tipo_venta });
