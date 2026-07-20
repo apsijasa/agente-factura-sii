@@ -69,7 +69,18 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
   async abrirYPreparar(payload: InvoicePayload): Promise<void> {
     const pagina = await this.paginaActiva();
     await pagina.goto(SELECTORES.urlEmisionFactura);
-    // Espera a que el operador esté autenticado (heurística: aparece el formulario).
+    // El SII redirige primero al login (zeus*.sii.cl/AUT2000). La página de login
+    // también tiene un campo "RUT", así que el agente NO debe tocar nada hasta que
+    // el operador termine de autenticarse y salga del dominio de autenticación.
+    if (/AUT2000|IngresoRutClave/i.test(pagina.url())) {
+      console.log(
+        'Inicie sesión en la ventana del SII (RUT y clave) y seleccione la empresa si el portal lo pide. El agente esperará…',
+      );
+      await pagina.waitForURL((url) => !/AUT2000|IngresoRutClave/i.test(url.toString()), {
+        timeout: this.opciones.timeoutMs,
+      });
+    }
+    // Autenticado: ahora sí esperar el formulario de emisión.
     await pagina.getByLabel(SELECTORES.campoRutReceptor.etiqueta).waitFor({ timeout: this.opciones.timeoutMs });
 
     await pagina.getByLabel(SELECTORES.campoRutReceptor.etiqueta).fill(payload.rut_cliente);
