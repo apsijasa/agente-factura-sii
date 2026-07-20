@@ -9,6 +9,10 @@ export const SELECTORES = {
   // Formulario directo (sesión autenticada y empresa ya seleccionada).
   urlFormularioFactura: 'https://www1.sii.cl/cgi-bin/Portal001/mipeGenFacEx.cgi?PTDC_CODIGO=33',
   selectorEmpresa: { rol: 'combobox', nombre: /empresa/i },
+  // Página de ingreso (zeus*.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html)
+  loginRut: '#rutcntr',
+  loginClave: '#clave',
+  loginIngresar: '#bt_ingresar',
   // Formulario mipeGenFacEx.cgi — calibrado contra el portal real (2026-07-20)
   // a partir de la evidencia guardada en .data/evidence. El RUT receptor va
   // separado en cuerpo y DV; las líneas de detalle usan sufijo _01, _02, …

@@ -47,6 +47,10 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       dirEvidencia: string; // .data/evidence
       timeoutMs: number;
       ciudadEmisor?: string;
+      // Auto-login: RUT de la persona natural + lector de la clave del llavero.
+      // La clave se obtiene al momento de usarla y nunca se registra en logs.
+      rutOperador?: string;
+      leerSecreto?: () => Promise<string>;
     },
   ) {}
 
@@ -81,9 +85,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     // también tiene un campo "RUT", así que el agente NO debe tocar nada hasta que
     // el operador termine de autenticarse y salga del dominio de autenticación.
     if (/AUT2000|IngresoRutClave/i.test(pagina.url())) {
-      console.log(
-        'Inicie sesión en la ventana del SII (RUT y clave) y seleccione la empresa si el portal lo pide. El agente esperará…',
-      );
+      await this.intentarAutoLogin(pagina);
       await pagina.waitForURL((url) => !/AUT2000|IngresoRutClave/i.test(url.toString()), {
         timeout: this.opciones.timeoutMs,
       });
@@ -171,6 +173,36 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
           `Evidencia guardada en ${base}.png/.html — usarla para calibrar selectores.` +
           dialogo +
           ` Detalle: ${(error as Error).message.split('\n')[0]}`,
+      );
+    }
+  }
+
+  // Completa RUT y clave (del llavero) en la página de ingreso del SII y pulsa
+  // Ingresar. NUNCA evade verificaciones adicionales: si el SII pide captcha o
+  // segundo factor, el operador lo resuelve en la ventana visible. Si la página
+  // no coincide con los selectores, cae al login manual con evidencia.
+  private async intentarAutoLogin(pagina: Page): Promise<void> {
+    const { rutOperador, leerSecreto } = this.opciones;
+    if (!rutOperador || !leerSecreto) {
+      console.log(
+        'Inicie sesión en la ventana del SII (RUT y clave) y seleccione la empresa si el portal lo pide. El agente esperará…',
+      );
+      return;
+    }
+    try {
+      await pagina.locator(SELECTORES.loginRut).waitFor({ timeout: 15000 });
+      const clave = await leerSecreto();
+      await pagina.locator(SELECTORES.loginRut).fill(rutOperador);
+      await pagina.locator(SELECTORES.loginClave).fill(clave);
+      await pagina.locator(SELECTORES.loginIngresar).click();
+      console.log(
+        'Credenciales enviadas al SII. Si el portal pide una verificación adicional, complétela en la ventana; el agente esperará…',
+      );
+    } catch {
+      await this.guardarEvidencia(pagina, 'login-no-calibrado');
+      console.log(
+        'No se pudo completar el login automático (página de ingreso distinta a la esperada). ' +
+          'Inicie sesión manualmente en la ventana del SII; el agente esperará…',
       );
     }
   }

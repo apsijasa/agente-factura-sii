@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { userInfo } from 'node:os';
 import { cargarConfig } from '../config/config.js';
+import { leerSecretoKeychain } from '../config/keychain.js';
+import { normalizarRut } from '../domain/rut.js';
 import { preflight } from '../config/preflight.js';
 import { crearAutenticadorDeviceCode, GraphClient } from '../adapters/graph/graph-client.js';
 import { ExcelAdapter } from '../adapters/excel/excel-adapter.js';
@@ -47,6 +49,8 @@ async function armarDependencias(): Promise<{ deps: Dependencias; repo: Facturas
       dirEvidencia: join(rutaDatos, 'evidence'),
       timeoutMs: config.timeoutSiiMs,
       ciudadEmisor: Object.values(config.emisores)[0]?.ciudadEmisor,
+      rutOperador: config.rutOperador ? (normalizarRut(config.rutOperador) ?? undefined) : undefined,
+      leerSecreto: () => leerSecretoKeychain(Object.keys(config.emisores)[0] as string),
     }),
     correo: new MailService(graph, config.buzonPrincipal),
     aprobacion: new ApprovalService(io, () => new Date(), userInfo().username),

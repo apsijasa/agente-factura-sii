@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { esRutValido } from '../domain/rut.js';
 
 export const esquemaConfig = z.object({
   tenantId: z.string().min(1),
@@ -14,6 +15,13 @@ export const esquemaConfig = z.object({
   timeoutSiiMs: z.number().int().positive().default(120000),
   timeoutAprobacionMs: z.number().int().positive().default(300000),
   modoPredeterminado: z.literal('simulation'),
+  // RUT de la persona natural (dueño/rep. legal) con el que se inicia sesión en
+  // el SII. Si está presente, el agente completa el login con la clave del
+  // llavero; si falta, el login es manual en la ventana visible.
+  rutOperador: z
+    .string()
+    .refine((v) => esRutValido(v), 'rutOperador debe ser un RUT válido')
+    .optional(),
   emisores: z
     .record(
       z.object({
