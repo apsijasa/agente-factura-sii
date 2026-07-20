@@ -40,6 +40,7 @@ export interface ISiiAdapter {
 export class SiiAdapterPlaywright implements ISiiAdapter {
   private navegador: Browser | null = null;
   private pagina: Page | null = null;
+  private ultimoDialogo: string | null = null;
 
   constructor(
     private readonly opciones: {
@@ -63,6 +64,12 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     const contexto = await this.navegador.newContext();
     this.pagina = await contexto.newPage();
     this.pagina.setDefaultTimeout(this.opciones.timeoutMs);
+    // El portal usa alert() para reportar errores de validación; capturamos el
+    // mensaje para incluirlo en la evidencia y aceptamos para no bloquear.
+    this.pagina.on('dialog', (dialogo) => {
+      this.ultimoDialogo = dialogo.message();
+      void dialogo.accept().catch(() => undefined);
+    });
     return this.pagina;
   }
 
@@ -87,26 +94,50 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       await pagina.locator(SELECTORES.campoRutReceptor.id).waitFor({ timeout: this.opciones.timeoutMs });
       await this.guardarEvidencia(pagina, 'formulario-emision');
 
+      // RUT receptor en cuerpo + DV; el blur dispara la búsqueda de datos del
+      // receptor en el padrón del SII (razón social, giro, dirección).
       const [cuerpoRut, dvRut] = payload.rut_cliente.split('-') as [string, string];
       await pagina.locator(SELECTORES.campoRutReceptor.id).fill(cuerpoRut);
       await pagina.locator(SELECTORES.campoDvReceptor.id).fill(dvRut);
-      await pagina.getByLabel(SELECTORES.tipoVenta.etiqueta).selectOption({ label: payload.tipo_venta });
-      await pagina.getByLabel(SELECTORES.tipoCompra.etiqueta).selectOption({ label: payload.tipo_compra });
+      await pagina.locator(SELECTORES.campoDvReceptor.id).blur();
+      await pagina.waitForTimeout(2000);
+      // Si el padrón no completó la razón social, usar la del libro.
+      const razonActual = await pagina.locator(SELECTORES.campoRazonSocialReceptor).inputValue();
+      if (razonActual.trim() === '') {
+        await pagina.locator(SELECTORES.campoRazonSocialReceptor).fill(payload.razon_social_cliente);
+      }
+
+      await pagina.locator(SELECTORES.campoFechaEmision).fill(payload.fecha_emision);
+      await pagina.locator(SELECTORES.tipoVenta).selectOption({ label: payload.tipo_venta });
+      await pagina.locator(SELECTORES.tipoCompra).selectOption({ label: payload.tipo_compra });
+      const etiquetaFormaPago = SELECTORES.formaPagoEtiquetas[payload.forma_pago];
+      if (!etiquetaFormaPago) throw new Error(`forma_pago sin etiqueta SII: ${payload.forma_pago}`);
+      await pagina.locator(SELECTORES.formaPago).selectOption({ label: etiquetaFormaPago });
 
       for (const [i, linea] of payload.lineas.entries()) {
-        if (i > 0) await pagina.getByRole('button', { name: SELECTORES.botonAgregarLinea.nombre }).click();
-        const fila = pagina.locator('tr.linea-detalle').nth(i);
-        await fila.getByRole('textbox', { name: SELECTORES.lineaDescripcion(i).nombre }).fill(linea.descripcion);
-        await fila.getByRole('textbox', { name: SELECTORES.lineaCantidad(i).nombre }).fill(String(linea.cantidad));
-        await fila.getByRole('textbox', { name: SELECTORES.lineaPrecio(i).nombre }).fill(String(linea.precio_unitario_clp));
+        if (i > 0) await pagina.locator(SELECTORES.botonAgregarLinea).click();
+        await pagina.locator(SELECTORES.lineaNombre(i)).fill(linea.descripcion);
+        await pagina.locator(SELECTORES.lineaCantidad(i)).fill(String(linea.cantidad));
+        await pagina.locator(SELECTORES.lineaPrecio(i)).fill(String(linea.precio_unitario_clp));
       }
-      await pagina.getByRole('button', { name: SELECTORES.botonVistaPrevia.nombre }).click();
+      // El total se recalcula con eventos de teclado; forzar blur antes de validar.
+      await pagina.locator(SELECTORES.lineaPrecio(payload.lineas.length - 1)).blur();
+      await pagina.waitForTimeout(500);
+
+      this.ultimoDialogo = null;
+      await pagina.locator(SELECTORES.botonVistaPrevia).click();
+      await pagina.waitForLoadState('networkidle');
+      if (this.ultimoDialogo) {
+        throw new Error(`El SII rechazó la validación del formulario: ${this.ultimoDialogo}`);
+      }
     } catch (error) {
       const base = await this.guardarEvidencia(pagina, 'form-fallo');
+      const dialogo = this.ultimoDialogo ? ` | Alerta del portal: ${this.ultimoDialogo}` : '';
       throw new Error(
         `Fallo al completar el formulario de emisión (url actual: ${pagina.url()}). ` +
-          `Evidencia guardada en ${base}.png/.html — usarla para calibrar selectores. ` +
-          `Detalle: ${(error as Error).message.split('\n')[0]}`,
+          `Evidencia guardada en ${base}.png/.html — usarla para calibrar selectores.` +
+          dialogo +
+          ` Detalle: ${(error as Error).message.split('\n')[0]}`,
       );
     }
   }
@@ -121,6 +152,8 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
 
   async extraerPreview(payload: InvoicePayload): Promise<ResultadoPreview> {
     const pagina = await this.paginaActiva();
+    // Evidencia de la vista previa siempre, para calibrar la lectura de totales.
+    await this.guardarEvidencia(pagina, 'vista-previa');
     const leerMonto = async (patron: RegExp): Promise<number> => {
       const fila = pagina.getByText(patron).locator('xpath=ancestor::tr[1]');
       const texto = (await fila.innerText()).replace(/\s+/g, ' ');
