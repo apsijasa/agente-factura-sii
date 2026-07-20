@@ -6,7 +6,10 @@ export const SELECTORES = {
   urlPortal: 'https://www.sii.cl/servicios_online/1039-.html',
   urlEmisionFactura: 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi?DESDE_DONDE_URL=OPCION%3D2%26TIPO%3D4',
   selectorEmpresa: { rol: 'combobox', nombre: /empresa/i },
-  campoRutReceptor: { etiqueta: /rut/i },
+  // Formulario mipeGenFacEx.cgi (calibrado contra el portal real 2026-07-20):
+  // los campos usan ids EFXP_*. El RUT receptor va separado en cuerpo y DV.
+  campoRutReceptor: { id: '#EFXP_RUT_RECEP', etiqueta: /rut/i },
+  campoDvReceptor: { id: '#EFXP_DV_RECEP' },
   campoRazonSocial: { etiqueta: /raz[oó]n social/i },
   campoGiro: { etiqueta: /giro/i },
   campoDireccion: { etiqueta: /direcci[oó]n/i },
