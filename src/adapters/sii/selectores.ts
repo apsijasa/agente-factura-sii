@@ -4,7 +4,8 @@
 // Verificar y ajustar en la primera sesión real de `preview-sii`.
 export const SELECTORES = {
   urlPortal: 'https://www.sii.cl/servicios_online/1039-.html',
-  urlEmisionFactura: 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi?DESDE_DONDE_URL=OPCION%3D2%26TIPO%3D4',
+  // OPCION=33 = factura electrónica (DTE 33); verificado con el operador 2026-07-20.
+  urlEmisionFactura: 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi?DESDE_DONDE_URL=OPCION%3D33%26TIPO%3D4',
   selectorEmpresa: { rol: 'combobox', nombre: /empresa/i },
   // Formulario mipeGenFacEx.cgi — calibrado contra el portal real (2026-07-20)
   // a partir de la evidencia guardada en .data/evidence. El RUT receptor va
@@ -17,6 +18,8 @@ export const SELECTORES = {
   campoComunaReceptor: 'input[name="EFXP_CMNA_RECEP"]',
   campoCiudadReceptor: 'input[name="EFXP_CIUDAD_RECEP"]',
   campoFechaEmision: 'input[name="EFXP_FCH_EMIS"]',
+  campoCiudadOrigen: 'input[name="EFXP_CIUDAD_ORIGEN"]',
+  campoComunaOrigen: 'input[name="EFXP_CMNA_ORIGEN"]',
   tipoVenta: 'select[name="EFXP_TIPOVENTA_SELECT"]',
   tipoCompra: 'select[name="EFXP_TIPOCOMPRA_SELECT"]',
   formaPago: 'select[name="EFXP_FMA_PAGO"]',

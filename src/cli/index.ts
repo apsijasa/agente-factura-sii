@@ -43,7 +43,11 @@ async function armarDependencias(): Promise<{ deps: Dependencias; repo: Facturas
     store,
     excel,
     uf: new UfProvider(),
-    sii: new SiiAdapterPlaywright({ dirEvidencia: join(rutaDatos, 'evidence'), timeoutMs: config.timeoutSiiMs }),
+    sii: new SiiAdapterPlaywright({
+      dirEvidencia: join(rutaDatos, 'evidence'),
+      timeoutMs: config.timeoutSiiMs,
+      ciudadEmisor: Object.values(config.emisores)[0]?.ciudadEmisor,
+    }),
     correo: new MailService(graph, config.buzonPrincipal),
     aprobacion: new ApprovalService(io, () => new Date(), userInfo().username),
     clasificaciones: config.emisores,

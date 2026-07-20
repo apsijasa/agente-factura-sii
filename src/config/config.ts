@@ -15,7 +15,15 @@ export const esquemaConfig = z.object({
   timeoutAprobacionMs: z.number().int().positive().default(300000),
   modoPredeterminado: z.literal('simulation'),
   emisores: z
-    .record(z.object({ tipoVenta: z.string().min(1), tipoCompra: z.string().min(1) }))
+    .record(
+      z.object({
+        tipoVenta: z.string().min(1),
+        tipoCompra: z.string().min(1),
+        // El formulario del SII exige la ciudad del emisor y no siempre la
+        // precarga desde el padrón; se completa desde aquí si falta.
+        ciudadEmisor: z.string().optional(),
+      }),
+    )
     .refine((e) => Object.keys(e).length > 0, 'Debe configurarse al menos un emisor'),
 });
 

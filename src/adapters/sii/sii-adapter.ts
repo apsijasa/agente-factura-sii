@@ -46,6 +46,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     private readonly opciones: {
       dirEvidencia: string; // .data/evidence
       timeoutMs: number;
+      ciudadEmisor?: string;
     },
   ) {}
 
@@ -110,10 +111,23 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       await pagina.locator(SELECTORES.campoDvReceptor.id).fill(dvRut);
       await pagina.locator(SELECTORES.campoDvReceptor.id).blur();
       await pagina.waitForTimeout(2000);
-      // Si el padrón no completó la razón social, usar la del libro.
-      const razonActual = await pagina.locator(SELECTORES.campoRazonSocialReceptor).inputValue();
-      if (razonActual.trim() === '') {
-        await pagina.locator(SELECTORES.campoRazonSocialReceptor).fill(payload.razon_social_cliente);
+      // Si el padrón no completó los datos del receptor, usar los del libro.
+      // Si el portal los exige y tampoco están en el libro, la validación del
+      // SII lo alertará y la factura quedará en revisión (diseño §4).
+      const completarSiVacio = async (selector: string, valor: string): Promise<void> => {
+        const actual = await pagina.locator(selector).inputValue();
+        if (actual.trim() === '' && valor.trim() !== '') {
+          await pagina.locator(selector).fill(valor);
+        }
+      };
+      await completarSiVacio(SELECTORES.campoRazonSocialReceptor, payload.razon_social_cliente);
+      await completarSiVacio(SELECTORES.campoGiroReceptor, payload.giro_cliente);
+      await completarSiVacio(SELECTORES.campoDireccionReceptor, payload.direccion_cliente);
+      await completarSiVacio(SELECTORES.campoComunaReceptor, payload.comuna_cliente);
+      await completarSiVacio(SELECTORES.campoCiudadReceptor, payload.ciudad_cliente);
+      // Ciudad del emisor: el padrón suele dejarla vacía y el SII la exige.
+      if (this.opciones.ciudadEmisor) {
+        await completarSiVacio(SELECTORES.campoCiudadOrigen, this.opciones.ciudadEmisor);
       }
 
       await pagina.locator(SELECTORES.campoFechaEmision).fill(payload.fecha_emision);

@@ -72,6 +72,10 @@ export interface InvoicePayload {
   rut_cliente: string;
   razon_social_cliente: string;
   nombre_carpeta: string;
+  giro_cliente: string;
+  direccion_cliente: string;
+  comuna_cliente: string;
+  ciudad_cliente: string;
   periodo: string;
   fecha_emision: string;
   fecha_vencimiento: string;
