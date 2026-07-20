@@ -129,6 +129,44 @@ programa
   });
 
 programa
+  .command('test-email')
+  .description('Validación controlada: envía un correo [PRUEBA] desde el alias al buzón principal (no toca facturas ni el SII)')
+  .action(async () => {
+    const config = await cargarConfig(RAIZ);
+    const graph = new GraphClient(crearAutenticadorDeviceCode(config));
+    const excel = new ExcelAdapter(graph, config);
+    const { esquemaEmpresa } = await import('../domain/validacion.js');
+    const empresas = (await excel.leerTabla('tblEmpresas')).map((f) => esquemaEmpresa.parse(f));
+    const empresa = empresas.find((e) => e.activo);
+    if (!empresa) throw new Error('No hay empresa activa en tblEmpresas');
+    const { mkdtemp, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const dir = await mkdtemp(join(tmpdir(), 'prueba-correo-'));
+    const rutaPdf = join(dir, 'documento-de-prueba.pdf');
+    await writeFile(
+      rutaPdf,
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Size 4/Root 1 0 R>>\n%%EOF\n',
+    );
+    const correo = new MailService(graph, config.buzonPrincipal);
+    await correo.enviarFactura({
+      remitente: empresa.email_remitente,
+      destinatarios: [config.buzonPrincipal],
+      copia: [],
+      asunto: '[PRUEBA] Agente de facturación SII — verificación de alias',
+      cuerpo:
+        'Correo de prueba de la validación controlada.\n' +
+        `Remitente esperado (alias): ${empresa.email_remitente}\n` +
+        'Si el remitente visible en su bandeja NO es ese alias, Exchange lo está reescribiendo ' +
+        'y se debe habilitar el envío desde alias antes de operar.',
+      rutaPdf,
+    });
+    console.log(
+      `Correo [PRUEBA] enviado a ${config.buzonPrincipal}. ` +
+        `Revise la bandeja y verifique que el remitente visible sea ${empresa.email_remitente}.`,
+    );
+  });
+
+programa
   .command('setup')
   .description('Asistente interactivo: crea .data/config.json (pide el enlace del libro sin dejarlo en argumentos)')
   .action(async () => {
