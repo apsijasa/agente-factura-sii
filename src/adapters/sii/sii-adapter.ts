@@ -89,12 +89,15 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       });
     }
     // El retorno post-login no siempre respeta el destino: si no quedamos en el
-    // formulario de emisión, navegar de nuevo (ya autenticado). Si aparece la
-    // selección de empresa, el operador la elige y el flujo continúa solo.
+    // formulario de emisión, intentar primero la URL directa del formulario y,
+    // si el portal exige selección de empresa, pasar por esa ruta.
     if (!/mipeGenFacEx/i.test(pagina.url())) {
-      await pagina.goto(SELECTORES.urlEmisionFactura);
-      if (/mipeSelEmpresa/i.test(pagina.url())) {
-        console.log('Seleccione la empresa en la ventana del SII. El agente esperará…');
+      await pagina.goto(SELECTORES.urlFormularioFactura);
+      if (!/mipeGenFacEx/i.test(pagina.url())) {
+        await pagina.goto(SELECTORES.urlEmisionFactura);
+        if (/mipeSelEmpresa/i.test(pagina.url())) {
+          console.log('Seleccione la empresa en la ventana del SII. El agente esperará…');
+        }
       }
     }
     // Autenticado: ahora sí esperar el formulario de emisión y llenarlo.

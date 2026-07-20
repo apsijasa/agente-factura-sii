@@ -6,6 +6,8 @@ export const SELECTORES = {
   urlPortal: 'https://www.sii.cl/servicios_online/1039-.html',
   // OPCION=33 = factura electrónica (DTE 33); verificado con el operador 2026-07-20.
   urlEmisionFactura: 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi?DESDE_DONDE_URL=OPCION%3D33%26TIPO%3D4',
+  // Formulario directo (sesión autenticada y empresa ya seleccionada).
+  urlFormularioFactura: 'https://www1.sii.cl/cgi-bin/Portal001/mipeGenFacEx.cgi?PTDC_CODIGO=33',
   selectorEmpresa: { rol: 'combobox', nombre: /empresa/i },
   // Formulario mipeGenFacEx.cgi — calibrado contra el portal real (2026-07-20)
   // a partir de la evidencia guardada en .data/evidence. El RUT receptor va
