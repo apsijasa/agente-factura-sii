@@ -98,7 +98,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       if (!/mipeGenFacEx/i.test(pagina.url())) {
         await pagina.goto(SELECTORES.urlEmisionFactura);
         if (/mipeSelEmpresa/i.test(pagina.url())) {
-          console.log('Seleccione la empresa en la ventana del SII. El agente esperará…');
+          await this.intentarSeleccionEmpresa(pagina, payload.rut_emisor);
           await pagina.waitForURL((url) => !/mipeSelEmpresa/i.test(url.toString()), {
             timeout: this.opciones.timeoutMs,
           });
@@ -203,6 +203,39 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       console.log(
         'No se pudo completar el login automático (página de ingreso distinta a la esperada). ' +
           'Inicie sesión manualmente en la ventana del SII; el agente esperará…',
+      );
+    }
+  }
+
+  // Selecciona la empresa emisora en mipeSelEmpresa.cgi buscándola por su RUT
+  // (con y sin puntos). Si la página no coincide con lo esperado, guarda
+  // evidencia y cede el clic al operador.
+  private async intentarSeleccionEmpresa(pagina: Page, rutEmisor: string): Promise<void> {
+    await this.guardarEvidencia(pagina, 'seleccion-empresa');
+    const [cuerpo, dv] = rutEmisor.split('-') as [string, string];
+    const conPuntos = `${Number(cuerpo).toLocaleString('es-CL')}-${dv}`;
+    const patron = new RegExp(`${conPuntos.replace(/\./g, '\\.?')}|${cuerpo}-?${dv}`, 'i');
+    try {
+      const opcion = pagina.locator('select option', { hasText: patron }).first();
+      if ((await opcion.count()) > 0) {
+        const valor = await opcion.getAttribute('value');
+        const select = opcion.locator('xpath=ancestor::select[1]');
+        if (valor !== null) await select.selectOption(valor);
+      } else {
+        await pagina.getByText(patron).first().click({ timeout: 10000 });
+      }
+      const botonContinuar = pagina
+        .getByRole('button', { name: /continuar|enviar|aceptar|seleccionar/i })
+        .or(pagina.locator('input[type="submit"]'))
+        .first();
+      if ((await botonContinuar.count()) > 0 && (await botonContinuar.isVisible())) {
+        await botonContinuar.click();
+      }
+      console.log(`Empresa ${conPuntos} seleccionada automáticamente.`);
+    } catch {
+      console.log(
+        'No se pudo seleccionar la empresa automáticamente (página distinta a la esperada). ' +
+          'Selecciónela en la ventana del SII; el agente esperará…',
       );
     }
   }
