@@ -90,24 +90,21 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
         timeout: this.opciones.timeoutMs,
       });
     }
-    // El retorno post-login no siempre respeta el destino: si no quedamos en el
-    // formulario de emisión, intentar primero la URL directa del formulario y,
-    // si el portal exige selección de empresa, pasar por esa ruta.
+    // Pasar SIEMPRE por la selección de empresa (diseño §5: seleccionar el
+    // emisor explícitamente). Nunca confiar en la empresa por defecto de la
+    // sesión: el operador puede representar a varias.
+    if (!/mipeSelEmpresa|mipeGenFacEx/i.test(pagina.url())) {
+      await pagina.goto(SELECTORES.urlEmisionFactura);
+    }
+    if (/mipeSelEmpresa/i.test(pagina.url())) {
+      await this.intentarSeleccionEmpresa(pagina, payload.rut_emisor);
+      await pagina.waitForURL((url) => !/mipeSelEmpresa/i.test(url.toString()), {
+        timeout: this.opciones.timeoutMs,
+      });
+    }
+    // Si tras elegir empresa el portal deja en un menú, ir directo al formulario.
     if (!/mipeGenFacEx/i.test(pagina.url())) {
       await pagina.goto(SELECTORES.urlFormularioFactura);
-      if (!/mipeGenFacEx/i.test(pagina.url())) {
-        await pagina.goto(SELECTORES.urlEmisionFactura);
-        if (/mipeSelEmpresa/i.test(pagina.url())) {
-          await this.intentarSeleccionEmpresa(pagina, payload.rut_emisor);
-          await pagina.waitForURL((url) => !/mipeSelEmpresa/i.test(url.toString()), {
-            timeout: this.opciones.timeoutMs,
-          });
-        }
-        // Si tras elegir empresa el portal deja en un menú, ir directo al formulario.
-        if (!/mipeGenFacEx/i.test(pagina.url())) {
-          await pagina.goto(SELECTORES.urlFormularioFactura);
-        }
-      }
     }
     // Autenticado: ahora sí esperar el formulario de emisión y llenarlo.
     // Ante CUALQUIER problema se guarda evidencia local (captura + HTML) en
@@ -115,6 +112,20 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     try {
       await pagina.locator(SELECTORES.campoRutReceptor.id).waitFor({ timeout: this.opciones.timeoutMs });
       await this.guardarEvidencia(pagina, 'formulario-emision');
+
+      // Verificación dura del emisor: el formulario debe pertenecer a la
+      // empresa del payload. Si no coincide, detenerse sin escribir nada.
+      const normalizar = (v: string) => v.toUpperCase().replace(/\s+/g, ' ').trim();
+      const emisorEnFormulario = normalizar(
+        await pagina.locator(SELECTORES.emisorRazonSocial).inputValue(),
+      );
+      const emisorEsperado = normalizar(payload.razon_social_emisor);
+      if (!emisorEnFormulario.includes(emisorEsperado) && !emisorEsperado.includes(emisorEnFormulario)) {
+        throw new Error(
+          `El formulario pertenece a otra empresa ("${emisorEnFormulario}"), ` +
+            `se esperaba "${emisorEsperado}". Verifique la selección de empresa.`,
+        );
+      }
 
       // RUT receptor en cuerpo + DV; el blur dispara la búsqueda de datos del
       // receptor en el padrón del SII (razón social, giro, dirección).

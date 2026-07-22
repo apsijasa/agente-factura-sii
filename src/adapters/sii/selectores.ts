@@ -24,6 +24,7 @@ export const SELECTORES = {
   campoComunaReceptor: 'input[name="EFXP_CMNA_RECEP"]',
   campoCiudadReceptor: 'input[name="EFXP_CIUDAD_RECEP"]',
   campoFechaEmision: 'input[name="EFXP_FCH_EMIS"]',
+  emisorRazonSocial: 'input[name="EFXP_RZN_SOC"]',
   campoCiudadOrigen: 'input[name="EFXP_CIUDAD_ORIGEN"]',
   campoComunaOrigen: 'input[name="EFXP_CMNA_ORIGEN"]',
   tipoVenta: 'select[name="EFXP_TIPOVENTA_SELECT"]',
