@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { userInfo } from 'node:os';
 import { cargarConfig } from '../config/config.js';
-import { leerSecretoKeychain } from '../config/keychain.js';
+import { leerSecretoKeychain, obtenerOCrearClaveCifrado } from '../config/keychain.js';
+import { crearCachePluginCifrado } from '../adapters/graph/token-cache.js';
 import { normalizarRut } from '../domain/rut.js';
 import { preflight } from '../config/preflight.js';
 import { crearAutenticadorDeviceCode, GraphClient } from '../adapters/graph/graph-client.js';
@@ -23,12 +24,20 @@ import { logger } from '../services/logger.js';
 
 const RAIZ = process.cwd();
 
+// Cache de tokens Microsoft cifrado (la llave vive en el llavero): evita
+// repetir el código de dispositivo en cada comando.
+function cachePluginMsal(rutaDatos: string) {
+  return crearCachePluginCifrado(join(rutaDatos, 'msal-cache.enc'), () => obtenerOCrearClaveCifrado());
+}
+
 type Readline = ReturnType<typeof createInterface>;
 
 async function armarDependencias(): Promise<{ deps: Dependencias; repo: FacturasRepository; rutEmisor: string; graph: GraphClient; rutaDatos: string; rl: Readline }> {
   const config = await cargarConfig(RAIZ);
   const rutaDatos = join(RAIZ, config.rutaDatos);
-  const graph = new GraphClient(crearAutenticadorDeviceCode(config));
+  const graph = new GraphClient(
+    crearAutenticadorDeviceCode({ ...config, cachePlugin: cachePluginMsal(rutaDatos) }),
+  );
   const excel = new ExcelAdapter(graph, config);
   const store = new AuditStore(join(rutaDatos, 'agente.sqlite'));
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -137,7 +146,9 @@ programa
   .description('Validación controlada: envía un correo [PRUEBA] desde el alias al buzón principal (no toca facturas ni el SII)')
   .action(async () => {
     const config = await cargarConfig(RAIZ);
-    const graph = new GraphClient(crearAutenticadorDeviceCode(config));
+    const graph = new GraphClient(
+      crearAutenticadorDeviceCode({ ...config, cachePlugin: cachePluginMsal(join(RAIZ, config.rutaDatos)) }),
+    );
     const excel = new ExcelAdapter(graph, config);
     const { esquemaEmpresa } = await import('../domain/validacion.js');
     const empresas = (await excel.leerTabla('tblEmpresas')).map((f) => esquemaEmpresa.parse(f));
@@ -180,7 +191,9 @@ programa
       const clientId = await rl.question('Client ID de la aplicación: ');
       const buzonPrincipal = await rl.question('Buzón principal (autenticación): ');
       const enlace = await rl.question('Pegue el enlace compartido del libro de OneDrive: ');
-      const graph = new GraphClient(crearAutenticadorDeviceCode({ tenantId, clientId }));
+      const graph = new GraphClient(
+      crearAutenticadorDeviceCode({ tenantId, clientId, cachePlugin: cachePluginMsal(join(RAIZ, '.data')) }),
+    );
       // Resolver driveId/itemId desde el enlace compartido (Graph shares API).
       const codificado = 'u!' + Buffer.from(enlace).toString('base64url');
       let item: { id: string; parentReference: { driveId: string } };
