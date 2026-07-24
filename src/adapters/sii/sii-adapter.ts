@@ -300,29 +300,41 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     // El SII puede pedir aquí la firma del operador (clave o certificado):
     // el agente espera con paciencia y solo observa, sin tocar nada.
     let folio: string;
+    let paginaConfirmacion: Page = pagina;
     try {
       await pagina.waitForLoadState('networkidle').catch(() => undefined);
       await this.guardarEvidencia(pagina, 'post-firmar');
       console.log(
-        'Si el SII solicita su clave o certificado para firmar, complételo en la ventana. ' +
+        'Si el SII solicita su clave o certificado para firmar, complételo en la ventana ' +
+          '(puede abrirse una ventana nueva; NO cierre ninguna). ' +
           'El agente esperará la confirmación con el folio…',
       );
+      // La firma puede ocurrir en una ventana emergente: buscar el folio en
+      // TODAS las páginas abiertas del navegador, tolerando cierres parciales.
+      const contexto = pagina.context();
       const limite = Date.now() + this.opciones.timeoutMs;
       let encontrado: string | null = null;
       while (Date.now() < limite && !encontrado) {
-        const texto = await pagina.innerText('body').catch(() => '');
-        const m = SELECTORES.folioEnConfirmacion.exec(texto);
-        if (m) {
-          encontrado = m[1] as string;
-        } else {
-          await pagina.waitForTimeout(2000);
+        for (const abierta of contexto.pages()) {
+          if (abierta.isClosed()) continue;
+          const texto = await abierta.innerText('body').catch(() => '');
+          const m = SELECTORES.folioEnConfirmacion.exec(texto);
+          if (m) {
+            encontrado = m[1] as string;
+            paginaConfirmacion = abierta;
+            break;
+          }
         }
+        if (!encontrado) await new Promise((resolver) => setTimeout(resolver, 2000));
       }
       if (!encontrado) {
-        await this.guardarEvidencia(pagina, 'emision-incierta');
+        for (const [i, abierta] of contexto.pages().entries()) {
+          if (!abierta.isClosed()) await this.guardarEvidencia(abierta, `emision-incierta-p${i}`);
+        }
         throw new Error('RESPUESTA_INCIERTA: no se encontró folio en la confirmación');
       }
       folio = encontrado;
+      await this.guardarEvidencia(paginaConfirmacion, 'confirmacion-folio');
     } catch (error) {
       const mensaje = (error as Error).message;
       if (mensaje.startsWith('RESPUESTA_INCIERTA:')) throw error;
@@ -333,8 +345,8 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     // la emisión existe y el folio debe sobrevivir para persistirse.
     try {
       const [descarga] = await Promise.all([
-        pagina.waitForEvent('download'),
-        pagina.getByRole('link', { name: SELECTORES.enlacePdf.nombre }).first().click(),
+        paginaConfirmacion.waitForEvent('download'),
+        paginaConfirmacion.getByRole('link', { name: SELECTORES.enlacePdf.nombre }).first().click(),
       ]);
       const rutaTmp = await descarga.path();
       const { readFile } = await import('node:fs/promises');

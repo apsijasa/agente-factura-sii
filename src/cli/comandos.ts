@@ -181,10 +181,18 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
     }
 
     // Respuesta incierta: consultar documentos emitidos antes de permitir otra acción (diseño §5 SiiAdapter).
-    const folioExistente = await deps.sii.consultarDocumentosEmitidos(payload.rut_cliente, payload.fecha_emision);
+    // La consulta puede fallar (p. ej. navegador cerrado): eso NUNCA debe
+    // impedir que la factura quede registrada en REQUIERE_REVISION.
+    let folioExistente: string | null = null;
+    let notaConsulta = '';
+    try {
+      folioExistente = await deps.sii.consultarDocumentosEmitidos(payload.rut_cliente, payload.fecha_emision);
+    } catch (errorConsulta) {
+      notaConsulta = `; consulta de documentos emitidos falló: ${(errorConsulta as Error).message}`;
+    }
     const detalle = folioExistente
       ? `emisión incierta; documentos emitidos muestra folio ${folioExistente}`
-      : `emisión incierta sin folio visible: ${(error as Error).message}`;
+      : `emisión incierta sin folio visible: ${(error as Error).message}${notaConsulta}`;
     // El folio hallado se persiste ANTES de la transición terminal: es la única
     // evidencia de que el documento existe y no puede perderse.
     if (folioExistente) deps.store.guardarFolio(facturaId, folioExistente);
