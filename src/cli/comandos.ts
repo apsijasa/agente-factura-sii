@@ -266,7 +266,13 @@ export async function ejecutarRetryEmail(deps: Dependencias, facturaId: string):
     });
     deps.store.registrarIntentoCorreo(facturaId, true, 'reintento exitoso');
     deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado en reintento');
-    await deps.excel.actualizarFilaFacturas(facturaId, { estado: 'ENVIADA', fecha_envio: new Date().toISOString(), error: '' });
+    await deps.excel.actualizarFilaFacturas(facturaId, {
+      estado: 'ENVIADA',
+      folio_sii: fila.folio_sii,
+      pdf_path: fila.pdf_path,
+      fecha_envio: new Date().toISOString(),
+      error: '',
+    });
   } catch (error) {
     deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
     throw error;
