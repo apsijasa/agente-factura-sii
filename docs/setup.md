@@ -71,3 +71,28 @@ toolchain de Xcode.
 3. Prueba de correo redirigida al buzón principal con asunto `[PRUEBA]`.
 4. Una única emisión real con `emit`, seleccionada y aprobada por el usuario.
 5. Revisar folio, PDF en `cliente/<carpeta>/<AAAA>/<MM>/`, correo, SQLite y Excel.
+
+## 8. Autonomía del login SII (opcional, recomendado)
+
+Agregar a `.data/config.json` el RUT de la persona natural que inicia sesión:
+
+```json
+"rutOperador": "12.345.678-9",
+```
+
+Con eso, `preview-sii` y `emit` completan el login del SII automáticamente con
+la clave del llavero. La selección de empresa también es automática (por el
+`rut_emisor` de `tblEmpresas`). Si el SII pide una verificación adicional, se
+resuelve manualmente en la ventana visible.
+
+## 9. Validación del alias de correo
+
+```bash
+pnpm agent test-email
+```
+
+Envía un correo `[PRUEBA]` desde el alias (`email_remitente`) al buzón
+principal. Si el remitente visible llega reescrito como el buzón principal,
+Exchange no tiene habilitado el envío desde alias: habilitar
+`Set-OrganizationConfig -SendFromAliasEnabled $true` (alias del mismo buzón) o
+conceder permiso "Enviar como" (buzón separado) antes de operar.
