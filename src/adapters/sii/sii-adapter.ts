@@ -297,13 +297,32 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
 
     // Tras el clic de emisión NO se sabe si el SII procesó la solicitud:
     // cualquier fallo antes de confirmar el folio se etiqueta como incierto.
+    // El SII puede pedir aquí la firma del operador (clave o certificado):
+    // el agente espera con paciencia y solo observa, sin tocar nada.
     let folio: string;
     try {
-      await pagina.waitForLoadState('networkidle');
-      const texto = await pagina.innerText('body');
-      const m = SELECTORES.folioEnConfirmacion.exec(texto);
-      if (!m) throw new Error('RESPUESTA_INCIERTA: no se encontró folio en la confirmación');
-      folio = m[1] as string;
+      await pagina.waitForLoadState('networkidle').catch(() => undefined);
+      await this.guardarEvidencia(pagina, 'post-firmar');
+      console.log(
+        'Si el SII solicita su clave o certificado para firmar, complételo en la ventana. ' +
+          'El agente esperará la confirmación con el folio…',
+      );
+      const limite = Date.now() + this.opciones.timeoutMs;
+      let encontrado: string | null = null;
+      while (Date.now() < limite && !encontrado) {
+        const texto = await pagina.innerText('body').catch(() => '');
+        const m = SELECTORES.folioEnConfirmacion.exec(texto);
+        if (m) {
+          encontrado = m[1] as string;
+        } else {
+          await pagina.waitForTimeout(2000);
+        }
+      }
+      if (!encontrado) {
+        await this.guardarEvidencia(pagina, 'emision-incierta');
+        throw new Error('RESPUESTA_INCIERTA: no se encontró folio en la confirmación');
+      }
+      folio = encontrado;
     } catch (error) {
       const mensaje = (error as Error).message;
       if (mensaje.startsWith('RESPUESTA_INCIERTA:')) throw error;
