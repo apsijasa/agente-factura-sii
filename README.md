@@ -1,30 +1,75 @@
 # Agente de Facturación SII
 
-CLI local (macOS) que prepara facturas electrónicas en el Sistema de Facturación
-Gratuito del SII a partir de cobros recurrentes en un libro Excel de OneDrive,
-con aprobación humana obligatoria antes de emitir.
+CLI local (macOS) que emite facturas electrónicas en el Sistema de Facturación
+Gratuito del SII a partir de cobros recurrentes definidos en un libro Excel de
+OneDrive, con aprobación humana obligatoria antes de cada emisión.
+
+**Estado: operativo.** Validado contra el portal real del SII en julio 2026
+(emisor CTA CONSULTORES), incluida una emisión real completa (folio 35,
+24-07-2026). Todo el flujo del portal está calibrado con evidencia de las
+páginas reales.
+
+## Qué hace en cada ciclo
+
+1. Lee empresas, clientes y cobros recurrentes desde el Excel de OneDrive
+   (Microsoft Graph, sesión cifrada persistente — sin logins repetidos).
+2. Valida todo (RUTs módulo 11, fechas de calendario, montos, correos) y agrupa
+   los cobros del día en una factura por cliente.
+3. Para cobros en UF, obtiene el valor oficial de la UF del día desde sii.cl y
+   registra su procedencia en la auditoría.
+4. Entra al SII solo: login con RUT/clave (llavero), selección de la empresa
+   emisora por RUT, formulario completo, validación.
+5. Compara los totales que calcula el SII con los esperados — deben ser
+   idénticos al peso.
+6. Muestra el resumen y espera la aprobación humana: el texto exacto
+   `APROBAR <factura_id>`. **Este paso nunca se automatiza.**
+7. Firma el documento (clave de firma desde el llavero), captura el folio,
+   descarga el PDF y lo archiva en `cliente/<carpeta>/<AAAA>/<MM>/`.
+8. Envía el PDF por correo al cliente (con copia configurada) desde el alias.
+9. Registra cada transición en SQLite y refleja el resultado en `tblFacturas`.
 
 ## Comandos
 
 | Comando | Efecto |
 |---|---|
-| `pnpm agent setup` | Asistente de configuración (crea `.data/config.json`) |
-| `pnpm agent prepare --mode simulation [--date AAAA-MM-DD]` | Prepara facturas en simulación; no abre el SII ni envía correos |
-| `pnpm agent preview-sii --invoice <factura_id>` | Completa la factura en el SII y compara totales; se detiene antes de emitir |
-| `pnpm agent emit --invoice <factura_id>` | Emisión real: exige `APROBAR <factura_id>` |
-| `pnpm agent retry-email --invoice <factura_id>` | Reintenta solo el correo; nunca vuelve a emitir |
-| `pnpm agent test-email` | Envía un correo `[PRUEBA]` desde el alias al buzón principal (validación del alias) |
+| `pnpm agent setup` | Asistente de configuración inicial (crea `.data/config.json`) |
+| `pnpm agent prepare --mode simulation [--date AAAA-MM-DD]` | Prepara las facturas del día; no toca el SII ni envía correos |
+| `pnpm agent preview-sii --invoice <factura_id>` | Ensayo real en el SII: llena y valida, compara totales y se detiene antes de firmar |
+| `pnpm agent emit --invoice <factura_id>` | Emisión real; exige `APROBAR <factura_id>` |
+| `pnpm agent retry-email --invoice <factura_id>` | Reintenta solo el correo de una factura ya emitida; nunca vuelve a emitir |
+| `pnpm agent test-email` | Correo `[PRUEBA]` desde el alias al buzón principal (verificación del alias) |
 
-## Autonomía en el SII (calibrado contra el portal real, jul 2026)
+Todos se ejecutan desde la carpeta del proyecto. Ver
+[docs/operacion.md](docs/operacion.md) para el ciclo mensual completo y
+[docs/setup.md](docs/setup.md) para la configuración inicial.
 
-Con `rutOperador` en `.data/config.json` y la clave en el llavero, el agente:
-inicia sesión en el SII, selecciona la empresa emisora por su RUT (obligatorio,
-nunca usa la empresa por defecto de la sesión), verifica que el formulario
-pertenezca al emisor esperado, completa receptor/fechas/líneas, valida y compara
-los totales del SII con los esperados. Se detiene SIEMPRE antes de "Firmar",
-salvo en `emit` con aprobación explícita vigente. Cualquier verificación
-adicional del portal (captcha, segundo factor) la resuelve el operador en la
-ventana visible: el agente nunca la evade.
+## Seguridad
+
+- **Modo predeterminado: simulación.** No existen rutas implícitas hacia
+  emisión real; `emit` es el único camino y pasa por la aprobación.
+- **La aprobación va ligada al contenido exacto** (hash SHA-256 del payload):
+  si cualquier dato cambia entre la preparación y la emisión, se invalida.
+- **Una sola acción de emisión, jamás reintentos**: ante una respuesta incierta
+  del SII la factura queda en `REQUIERE_REVISION` y ninguna ruta automática
+  puede volver a emitirla. Un folio confirmado nunca se pierde, aunque falle la
+  descarga del PDF o el correo.
+- **Secretos solo en el llavero de macOS**: clave del SII (cuenta
+  `<empresa_id>`), clave de firma (cuenta `<empresa_id>-firma`) y la llave del
+  cache de tokens Microsoft (`msal-cache-key`). Nada en código, Excel, Git ni
+  logs (logger con redacción de RUTs, correos y tokens).
+- El navegador del SII es **visible**: cualquier verificación extraordinaria
+  del portal (captcha, segundo factor) la resuelve el operador; el agente no
+  evade controles de seguridad.
+- Evidencia de cada sesión SII (capturas + HTML) en `.data/evidence`, local.
+
+## Recuperación
+
+- Proceso caído en plena emisión → la factura huérfana en `EMITIENDO` pasa a
+  `REQUIERE_REVISION` automáticamente al iniciar cualquier comando.
+- Ante `REQUIERE_REVISION`: **verificar primero en el SII** (documentos
+  emitidos) si el documento existe, antes de cualquier acción manual.
+- Correo fallido → `ERROR_REINTENTABLE`; se resuelve con `retry-email`,
+  conservando folio y PDF.
 
 ## Calidad
 
@@ -32,25 +77,5 @@ ventana visible: el agente nunca la evade.
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
-## Seguridad
-
-- Modo predeterminado: simulación. No existen rutas implícitas hacia emisión real.
-- Credencial SII en el llavero de macOS; token Graph en `.data/msal-cache.enc`
-  cifrado con AES-256-GCM (llave en el llavero, cuenta `msal-cache-key`).
-- El agente no evade CAPTCHA ni MFA: el navegador es visible y el operador se autentica.
-- Logs con redacción de RUT, correos y tokens. Evidencias en `.data/evidence`.
-
-## Recuperación
-
-Si el proceso cae en plena emisión, la factura queda huérfana en el estado
-`EMITIENDO`. Al iniciar cualquier comando siguiente, el agente detecta esas
-filas automáticamente y las pasa a `REQUIERE_REVISION` antes de permitir
-cualquier otra acción: el resultado real en el SII es desconocido y ninguna
-ruta automática puede volver a emitir sobre esa factura.
-
-Ante una factura en `REQUIERE_REVISION`, **verificar primero en el SII**
-(sección de documentos emitidos, por RUT del cliente y fecha) si el
-documento efectivamente se emitió, antes de tomar cualquier acción manual
-sobre la factura o el libro Excel.
-
-Ver `docs/setup.md` para la configuración inicial completa.
+Suite de 169 pruebas (dominio tributario, adaptadores, integración simulada);
+las pruebas automáticas jamás tocan el SII real ni envían correos.

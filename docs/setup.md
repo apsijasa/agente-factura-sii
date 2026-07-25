@@ -1,5 +1,9 @@
 # Configuración inicial
 
+Pasos que se hacen **una sola vez**. La operación del día a día está en
+[operacion.md](operacion.md). Configuración de referencia validada en julio
+2026: emisor CTA CONSULTORES (`EMP-001`), buzón `apsijas@grupoatlas.cl`.
+
 ## 1. Aplicación Microsoft Entra
 
 1. En https://entra.microsoft.com → App registrations → New registration.
@@ -9,14 +13,22 @@
    `User.Read`, `Files.ReadWrite`, `Mail.Send`, `offline_access`. Conceder consentimiento.
 5. Anotar **Tenant ID** y **Client ID** para `pnpm agent setup`.
 
-## 2. Credencial SII en el llavero
+## 2. Credenciales SII en el llavero
+
+Dos secretos, ambos en el llavero de macOS (nunca en archivos):
 
 ```bash
+# Clave tributaria (con la que se entra a sii.cl — la de la persona natural):
 security add-generic-password -s agente-factura-sii -a <empresa_id> -w
+
+# Clave de firma del documento electrónico (la que pide la pantalla
+# "Firma de Documento Electronico" al emitir):
+security add-generic-password -s agente-factura-sii -a <empresa_id>-firma -w
 ```
 
-Ingresar la clave tributaria cuando la pida (no queda en el historial).
-Rotar la contraseña compartida durante el levantamiento ANTES de cualquier prueba real.
+Cada comando pide el valor de forma interactiva (no se ve al escribir y no
+queda en el historial). El `<empresa_id>` debe ser el mismo de `tblEmpresas`
+(ej: `EMP-001`). Rotar cualquier clave que se haya compartido por chat o correo.
 
 ## 3. Certificado digital
 
@@ -72,7 +84,7 @@ toolchain de Xcode.
 4. Una única emisión real con `emit`, seleccionada y aprobada por el usuario.
 5. Revisar folio, PDF en `cliente/<carpeta>/<AAAA>/<MM>/`, correo, SQLite y Excel.
 
-## 8. Autonomía del login SII (opcional, recomendado)
+## 8. Autonomía completa en el SII (opcional, recomendado)
 
 Agregar a `.data/config.json` el RUT de la persona natural que inicia sesión:
 
@@ -80,10 +92,24 @@ Agregar a `.data/config.json` el RUT de la persona natural que inicia sesión:
 "rutOperador": "12.345.678-9",
 ```
 
-Con eso, `preview-sii` y `emit` completan el login del SII automáticamente con
-la clave del llavero. La selección de empresa también es automática (por el
-`rut_emisor` de `tblEmpresas`). Si el SII pide una verificación adicional, se
-resuelve manualmente en la ventana visible.
+Con eso (más las dos claves del llavero del paso 2), `preview-sii` y `emit`
+hacen todo el portal solos: login, selección de empresa por el `rut_emisor` de
+`tblEmpresas` (siempre explícita, con verificación de que el formulario
+pertenezca al emisor esperado), formulario, validación y — solo en `emit`, tras
+la aprobación — la firma del documento. Si el SII pide una verificación
+adicional (captcha, segundo factor), se resuelve manualmente en la ventana
+visible: el agente espera y nunca la evade.
+
+También en `.data/config.json`, por emisor, la ciudad que el formulario del SII
+exige y el padrón no siempre precarga:
+
+```json
+"emisores": { "EMP-001": { "tipoVenta": "Del Giro", "tipoCompra": "Del Giro", "ciudadEmisor": "Santiago" } }
+```
+
+El código de dispositivo de Microsoft se pide **solo la primera vez**: la
+sesión queda en `.data/msal-cache.enc`, cifrada (AES-256-GCM) con una llave que
+vive en el llavero (`msal-cache-key`).
 
 ## 9. Validación del alias de correo
 
