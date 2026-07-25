@@ -39,9 +39,11 @@ páginas reales.
 | `pnpm agent retry-email --invoice <factura_id>` | Reintenta solo el correo de una factura ya emitida; nunca vuelve a emitir |
 | `pnpm agent test-email` | Correo `[PRUEBA]` desde el alias al buzón principal (verificación del alias) |
 
-Todos se ejecutan desde la carpeta del proyecto. Ver
-[docs/operacion.md](docs/operacion.md) para el ciclo mensual completo y
-[docs/setup.md](docs/setup.md) para la configuración inicial.
+Todos se ejecutan desde la carpeta del proyecto. Documentación:
+
+- **[docs/manual-de-usuario.md](docs/manual-de-usuario.md)** — guía completa paso a paso (configurar + usar), para el operador
+- [docs/setup.md](docs/setup.md) — configuración inicial (referencia técnica)
+- [docs/operacion.md](docs/operacion.md) — ciclo mensual, referencia del Excel y solución de problemas
 
 ## Seguridad
 
