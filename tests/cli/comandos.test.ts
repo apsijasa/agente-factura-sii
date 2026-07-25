@@ -1,10 +1,11 @@
 // tests/cli/comandos.test.ts
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ejecutarCancel, ejecutarPrepare, ejecutarEmit, ejecutarPreviewSii, ejecutarRetryEmail } from '../../src/cli/comandos.js';
 import { AuditStore } from '../../src/store/audit-store.js';
+import { AlmacenPdfLocal } from '../../src/services/almacen-pdf.js';
 import { EmisionConfirmadaSinPdfError } from '../../src/adapters/sii/sii-adapter.js';
 import type { Dependencias } from '../../src/cli/comandos.js';
 
@@ -56,7 +57,7 @@ function dependenciasSimuladas(): Dependencias {
       hashVigente: vi.fn(() => true),
     } as never,
     clasificaciones: { E1: { tipoVenta: 'Del Giro', tipoCompra: 'Del Giro' } },
-    rutaRaizClientes: mkdtempSync(join(tmpdir(), 'clientes-')),
+    pdfs: new AlmacenPdfLocal(mkdtempSync(join(tmpdir(), 'clientes-'))),
     hoy: () => '2026-07-05',
   };
 }
@@ -66,7 +67,7 @@ describe('ejecutarPrepare (simulación)', () => {
     const deps = dependenciasSimuladas();
     const resultado = await ejecutarPrepare(deps, '2026-07-05');
     expect(resultado.preparadas).toEqual(['RECURRENT:E1:CL1:2026-07']);
-    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('PENDIENTE_APROBACION');
+    expect((await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07'))?.estado).toBe('PENDIENTE_APROBACION');
     expect((deps.sii.abrirYPreparar as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((deps.correo.enviarFactura as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((deps.excel.agregarFilaFacturas as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
@@ -75,7 +76,7 @@ describe('ejecutarPrepare (simulación)', () => {
   it('registra la procedencia del valor UF (valor, fecha, url y momento) en la auditoría', async () => {
     const deps = dependenciasSimuladas();
     await ejecutarPrepare(deps, '2026-07-05');
-    const eventos = deps.store.obtenerEventos('RECURRENT:E1:CL1:2026-07');
+    const eventos = await deps.store.obtenerEventos('RECURRENT:E1:CL1:2026-07');
     const conProcedencia = eventos.find((e) => e.detalle.includes('https://www.sii.cl/valores_y_fechas/uf/uf2026.htm'));
     expect(conProcedencia).toBeDefined();
     expect(conProcedencia?.detalle).toContain('39418.53');
@@ -97,7 +98,7 @@ describe('ejecutarEmit', () => {
     const deps = dependenciasSimuladas();
     await ejecutarPrepare(deps, '2026-07-05');
     await ejecutarEmit(deps, 'RECURRENT:E1:CL1:2026-07');
-    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    const f = await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
     expect(f?.estado).toBe('ENVIADA');
     expect(f?.folio_sii).toBe('12345');
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
@@ -110,7 +111,7 @@ describe('ejecutarEmit', () => {
     });
     await ejecutarPrepare(deps, '2026-07-05');
     await expect(ejecutarEmit(deps, 'RECURRENT:E1:CL1:2026-07')).rejects.toThrow(/coinciden|REVISION/i);
-    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('REQUIERE_REVISION');
+    expect((await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07'))?.estado).toBe('REQUIERE_REVISION');
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
@@ -131,8 +132,8 @@ describe('ejecutarEmit', () => {
     // adulterado: la verificación post-aprobación debe abortar sin emitir.
     let adulterar = false;
     const original = deps.store.obtenerFactura.bind(deps.store);
-    vi.spyOn(deps.store, 'obtenerFactura').mockImplementation((id: string) => {
-      const fila = original(id);
+    vi.spyOn(deps.store, 'obtenerFactura').mockImplementation(async (id: string) => {
+      const fila = await original(id);
       if (adulterar && fila) return { ...fila, payload_hash: 'hash-adulterado' };
       return fila;
     });
@@ -150,7 +151,7 @@ describe('ejecutarEmit', () => {
     (deps.sii.consultarDocumentosEmitidos as ReturnType<typeof vi.fn>).mockResolvedValue('55443');
     await ejecutarPrepare(deps, '2026-07-05');
     await expect(ejecutarEmit(deps, 'RECURRENT:E1:CL1:2026-07')).rejects.toThrow(/incierta/i);
-    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    const f = await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
     expect(f?.estado).toBe('REQUIERE_REVISION');
     expect(f?.folio_sii).toBe('55443');
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
@@ -166,7 +167,7 @@ describe('ejecutarEmit', () => {
     );
     await ejecutarPrepare(deps, '2026-07-05');
     await expect(ejecutarEmit(deps, 'RECURRENT:E1:CL1:2026-07')).rejects.toThrow(/99887|PDF/i);
-    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    const f = await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
     expect(f?.estado).toBe('ERROR_REINTENTABLE');
     expect(f?.folio_sii).toBe('99887');
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
@@ -182,7 +183,7 @@ describe('ejecutarPreviewSii', () => {
     expect((deps.sii.abrirYPreparar as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((deps.sii.extraerPreview as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
-    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('PENDIENTE_APROBACION');
+    expect((await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07'))?.estado).toBe('PENDIENTE_APROBACION');
   });
 });
 
@@ -191,9 +192,9 @@ describe('ejecutarCancel', () => {
     const deps = dependenciasSimuladas();
     await ejecutarPrepare(deps, '2026-07-05');
     await ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', 'emitida manualmente en el portal');
-    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    const f = await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
     expect(f?.estado).toBe('CANCELADA');
-    const eventos = deps.store.obtenerEventos('RECURRENT:E1:CL1:2026-07');
+    const eventos = await deps.store.obtenerEventos('RECURRENT:E1:CL1:2026-07');
     expect(eventos.at(-1)?.hacia).toBe('CANCELADA');
     expect(eventos.at(-1)?.detalle).toContain('emitida manualmente en el portal');
     expect((deps.excel.actualizarFilaFacturas as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
@@ -209,7 +210,7 @@ describe('ejecutarCancel', () => {
     const deps = dependenciasSimuladas();
     await ejecutarPrepare(deps, '2026-07-05');
     await expect(ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', '   ')).rejects.toThrow(/motivo/i);
-    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('PENDIENTE_APROBACION');
+    expect((await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07'))?.estado).toBe('PENDIENTE_APROBACION');
   });
 
   it('rechaza cancelar una factura ya emitida (estado terminal con folio)', async () => {
@@ -217,7 +218,7 @@ describe('ejecutarCancel', () => {
     await ejecutarPrepare(deps, '2026-07-05');
     await ejecutarEmit(deps, 'RECURRENT:E1:CL1:2026-07');
     await expect(ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', 'motivo')).rejects.toThrow(/ENVIADA|no se puede cancelar/i);
-    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    const f = await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
     expect(f?.estado).toBe('ENVIADA');
     expect(f?.folio_sii).toBe('12345');
   });
@@ -227,26 +228,28 @@ describe('ejecutarCancel', () => {
     await ejecutarPrepare(deps, '2026-07-05');
     (deps.excel.actualizarFilaFacturas as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Graph caído'));
     await ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', 'emitida manualmente');
-    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('CANCELADA');
+    expect((await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07'))?.estado).toBe('CANCELADA');
   });
 });
 
 describe('ejecutarRetryEmail', () => {
-  function llevarADescargada(deps: Dependencias, facturaId: string): void {
-    deps.store.registrarTransicion(facturaId, 'APROBADA', 'aprobada');
-    deps.store.registrarTransicion(facturaId, 'EMITIENDO', 'emisión');
-    deps.store.registrarTransicion(facturaId, 'EMITIDA', 'folio 12345');
-    deps.store.guardarFolio(facturaId, '12345');
-    deps.store.guardarRutaPdf(facturaId, '/tmp/f.pdf');
-    deps.store.registrarTransicion(facturaId, 'DESCARGADA', '/tmp/f.pdf');
+  async function llevarADescargada(deps: Dependencias, facturaId: string): Promise<void> {
+    const ruta = join(mkdtempSync(join(tmpdir(), 'pdf-')), 'f.pdf');
+    writeFileSync(ruta, '%PDF-1.4\n%%EOF\n');
+    await deps.store.registrarTransicion(facturaId, 'APROBADA', 'aprobada');
+    await deps.store.registrarTransicion(facturaId, 'EMITIENDO', 'emisión');
+    await deps.store.registrarTransicion(facturaId, 'EMITIDA', 'folio 12345');
+    await deps.store.guardarFolio(facturaId, '12345');
+    await deps.store.guardarRutaPdf(facturaId, ruta);
+    await deps.store.registrarTransicion(facturaId, 'DESCARGADA', ruta);
   }
 
   it('reintenta solo el correo y nunca toca el SiiAdapter', async () => {
     const deps = dependenciasSimuladas();
     await ejecutarPrepare(deps, '2026-07-05');
-    llevarADescargada(deps, 'RECURRENT:E1:CL1:2026-07');
+    await llevarADescargada(deps, 'RECURRENT:E1:CL1:2026-07');
     await ejecutarRetryEmail(deps, 'RECURRENT:E1:CL1:2026-07');
-    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('ENVIADA');
+    expect((await deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07'))?.estado).toBe('ENVIADA');
     expect((deps.correo.enviarFactura as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((deps.sii.abrirYPreparar as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect((deps.sii.extraerPreview as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();

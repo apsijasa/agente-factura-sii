@@ -20,7 +20,35 @@ export interface EventoEstado {
   creado_en: string;
 }
 
-export class AuditStore {
+export interface Aprobacion {
+  actor: string;
+  payload_hash: string;
+  aprobado_en: string;
+}
+
+/**
+ * Contrato del almacén de auditoría. Asíncrono a propósito: la implementación
+ * local (better-sqlite3) es síncrona por dentro, pero la de Supabase consulta
+ * por red, y ambas deben ser intercambiables en `Dependencias`.
+ */
+export interface IAuditStore {
+  crearFactura(payload: InvoicePayload, payloadHash: string): Promise<void>;
+  listarFacturaIds(): Promise<string[]>;
+  obtenerFactura(facturaId: string): Promise<FilaFactura | undefined>;
+  obtenerLineas(facturaId: string): Promise<LineaFactura[]>;
+  registrarTransicion(facturaId: string, hacia: Estado, detalle: string): Promise<void>;
+  obtenerEventos(facturaId: string): Promise<EventoEstado[]>;
+  registrarAprobacion(facturaId: string, actor: string, payloadHash: string, aprobadoEn: string): Promise<void>;
+  obtenerAprobacion(facturaId: string): Promise<Aprobacion | undefined>;
+  registrarIntentoCorreo(facturaId: string, exito: boolean, detalle: string): Promise<void>;
+  obtenerIntentosCorreo(facturaId: string): Promise<{ exito: number; detalle: string }[]>;
+  marcarEmisionesInterrumpidas(): Promise<string[]>;
+  guardarFolio(facturaId: string, folio: string): Promise<void>;
+  guardarRutaPdf(facturaId: string, ruta: string): Promise<void>;
+  cerrar(): Promise<void>;
+}
+
+export class AuditStore implements IAuditStore {
   private readonly db: Database.Database;
 
   constructor(ruta: string) {
@@ -71,8 +99,8 @@ export class AuditStore {
     `);
   }
 
-  crearFactura(payload: InvoicePayload, payloadHash: string): void {
-    const existe = this.obtenerFactura(payload.factura_id);
+  async crearFactura(payload: InvoicePayload, payloadHash: string): Promise<void> {
+    const existe = await this.obtenerFactura(payload.factura_id);
     if (existe) throw new Error(`La factura ${payload.factura_id} ya existe (idempotencia)`);
     const tx = this.db.transaction(() => {
       this.db
@@ -108,25 +136,25 @@ export class AuditStore {
     }
   }
 
-  listarFacturaIds(): string[] {
+  async listarFacturaIds(): Promise<string[]> {
     return (this.db.prepare('SELECT factura_id FROM invoice_runs ORDER BY factura_id').all() as { factura_id: string }[])
       .map((f) => f.factura_id);
   }
 
-  obtenerFactura(facturaId: string): FilaFactura | undefined {
+  async obtenerFactura(facturaId: string): Promise<FilaFactura | undefined> {
     return this.db.prepare('SELECT * FROM invoice_runs WHERE factura_id = ?').get(facturaId) as
       | FilaFactura
       | undefined;
   }
 
-  obtenerLineas(facturaId: string): LineaFactura[] {
+  async obtenerLineas(facturaId: string): Promise<LineaFactura[]> {
     return this.db
       .prepare('SELECT * FROM invoice_lines WHERE factura_id = ? ORDER BY cobro_id')
       .all(facturaId) as LineaFactura[];
   }
 
-  registrarTransicion(facturaId: string, hacia: Estado, detalle: string): void {
-    const actual = this.obtenerFactura(facturaId);
+  async registrarTransicion(facturaId: string, hacia: Estado, detalle: string): Promise<void> {
+    const actual = await this.obtenerFactura(facturaId);
     if (!actual) throw new Error(`Factura no encontrada: ${facturaId}`);
     assertTransicion(actual.estado, hacia);
     const tx = this.db.transaction(() => {
@@ -146,31 +174,31 @@ export class AuditStore {
     tx();
   }
 
-  obtenerEventos(facturaId: string): EventoEstado[] {
+  async obtenerEventos(facturaId: string): Promise<EventoEstado[]> {
     return this.db
       .prepare('SELECT * FROM state_events WHERE factura_id = ? ORDER BY id')
       .all(facturaId) as EventoEstado[];
   }
 
-  registrarAprobacion(facturaId: string, actor: string, payloadHash: string, aprobadoEn: string): void {
+  async registrarAprobacion(facturaId: string, actor: string, payloadHash: string, aprobadoEn: string): Promise<void> {
     this.db
       .prepare('INSERT OR REPLACE INTO approvals (factura_id, actor, payload_hash, aprobado_en) VALUES (?, ?, ?, ?)')
       .run(facturaId, actor, payloadHash, aprobadoEn);
   }
 
-  obtenerAprobacion(facturaId: string): { actor: string; payload_hash: string; aprobado_en: string } | undefined {
+  async obtenerAprobacion(facturaId: string): Promise<Aprobacion | undefined> {
     return this.db.prepare('SELECT actor, payload_hash, aprobado_en FROM approvals WHERE factura_id = ?').get(facturaId) as
-      | { actor: string; payload_hash: string; aprobado_en: string }
+      | Aprobacion
       | undefined;
   }
 
-  registrarIntentoCorreo(facturaId: string, exito: boolean, detalle: string): void {
+  async registrarIntentoCorreo(facturaId: string, exito: boolean, detalle: string): Promise<void> {
     this.db
       .prepare('INSERT INTO email_attempts (factura_id, exito, detalle) VALUES (?, ?, ?)')
       .run(facturaId, exito ? 1 : 0, detalle);
   }
 
-  obtenerIntentosCorreo(facturaId: string): { exito: number; detalle: string }[] {
+  async obtenerIntentosCorreo(facturaId: string): Promise<{ exito: number; detalle: string }[]> {
     return this.db
       .prepare('SELECT exito, detalle FROM email_attempts WHERE factura_id = ? ORDER BY id')
       .all(facturaId) as { exito: number; detalle: string }[];
@@ -182,13 +210,13 @@ export class AuditStore {
    * así que se fuerza REQUIERE_REVISION (transición legal) para que ninguna
    * ruta automática pueda volver a emitirla sin verificación humana.
    */
-  marcarEmisionesInterrumpidas(): string[] {
+  async marcarEmisionesInterrumpidas(): Promise<string[]> {
     const filas = this.db
       .prepare(`SELECT factura_id FROM invoice_runs WHERE estado = 'EMITIENDO' ORDER BY factura_id`)
       .all() as { factura_id: string }[];
     const ids: string[] = [];
     for (const { factura_id } of filas) {
-      this.registrarTransicion(
+      await this.registrarTransicion(
         factura_id,
         'REQUIERE_REVISION',
         'emisión interrumpida por caída del proceso; verificar documentos emitidos en el SII antes de cualquier acción',
@@ -198,15 +226,15 @@ export class AuditStore {
     return ids;
   }
 
-  guardarFolio(facturaId: string, folio: string): void {
+  async guardarFolio(facturaId: string, folio: string): Promise<void> {
     this.db.prepare('UPDATE invoice_runs SET folio_sii = ? WHERE factura_id = ?').run(folio, facturaId);
   }
 
-  guardarRutaPdf(facturaId: string, ruta: string): void {
+  async guardarRutaPdf(facturaId: string, ruta: string): Promise<void> {
     this.db.prepare('UPDATE invoice_runs SET pdf_path = ? WHERE factura_id = ?').run(ruta, facturaId);
   }
 
-  cerrar(): void {
+  async cerrar(): Promise<void> {
     this.db.close();
   }
 }

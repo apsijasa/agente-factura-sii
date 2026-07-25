@@ -1,7 +1,7 @@
 // src/store/facturas-repository.ts
 import type { ExcelAdapter, FilaFacturasExcel } from '../adapters/excel/excel-adapter.js';
 import type { Estado, InvoicePayload } from '../domain/tipos.js';
-import type { AuditStore } from './audit-store.js';
+import type { IAuditStore } from './audit-store.js';
 
 export function filaExcelDesdePayload(payload: InvoicePayload, estado: Estado): FilaFacturasExcel {
   return {
@@ -25,7 +25,7 @@ export function filaExcelDesdePayload(payload: InvoicePayload, estado: Estado): 
 
 export class FacturasRepository {
   constructor(
-    private readonly store: AuditStore,
+    private readonly store: IAuditStore,
     private readonly excel: ExcelAdapter,
   ) {}
 
@@ -42,7 +42,7 @@ export class FacturasRepository {
     const porId = new Map(filas.map((f) => [f.factura_id as string, f]));
 
     for (const [facturaId, fila] of porId) {
-      const local = this.store.obtenerFactura(facturaId);
+      const local = await this.store.obtenerFactura(facturaId);
       const folioExcel = (fila.folio_sii ?? '').trim();
       if (folioExcel && (!local || !local.folio_sii)) {
         throw new Error(
@@ -56,8 +56,8 @@ export class FacturasRepository {
       }
     }
 
-    for (const facturaId of this.store.listarFacturaIds()) {
-      const local = this.store.obtenerFactura(facturaId);
+    for (const facturaId of await this.store.listarFacturaIds()) {
+      const local = await this.store.obtenerFactura(facturaId);
       if (local?.folio_sii && !porId.has(facturaId)) {
         throw new Error(
           `Contradicción: ${facturaId} está EMITIDA en SQLite (folio ${local.folio_sii}) pero no existe en tblFacturas. Revisión manual requerida.`,

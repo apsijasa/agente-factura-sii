@@ -1,28 +1,41 @@
 // src/cli/index.ts
 import { Command } from 'commander';
 import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import { userInfo } from 'node:os';
-import { cargarConfig } from '../config/config.js';
+import { createClient } from '@supabase/supabase-js';
+import { cargarConfig, type Config } from '../config/config.js';
 import { leerSecretoKeychain, obtenerOCrearClaveCifrado } from '../config/keychain.js';
 import { crearCachePluginCifrado } from '../adapters/graph/token-cache.js';
 import { normalizarRut } from '../domain/rut.js';
 import { preflight } from '../config/preflight.js';
-import { crearAutenticadorDeviceCode, GraphClient } from '../adapters/graph/graph-client.js';
+import {
+  crearAutenticadorClientCredentials, crearAutenticadorDeviceCode, GraphClient,
+} from '../adapters/graph/graph-client.js';
 import { ExcelAdapter } from '../adapters/excel/excel-adapter.js';
 import { UfProvider } from '../adapters/uf/uf-provider.js';
 import { SiiAdapterPlaywright } from '../adapters/sii/sii-adapter.js';
 import { MailService } from '../services/correo.js';
-import { ApprovalService } from '../services/aprobacion.js';
-import { AuditStore } from '../store/audit-store.js';
+import { AlmacenPdfLocal, AlmacenPdfSupabase } from '../services/almacen-pdf.js';
+import { AprobacionRemota, ApprovalService } from '../services/aprobacion.js';
+import { crearNotificador } from '../services/notificador.js';
+import { AuditStore, type IAuditStore } from '../store/audit-store.js';
+import { AuditStoreSupabase } from '../store/audit-store-supabase.js';
 import { FacturasRepository } from '../store/facturas-repository.js';
 import { conBloqueo } from './lock.js';
 import {
-  ejecutarCancel, ejecutarEmit, ejecutarPrepare, ejecutarPreviewSii, ejecutarRetryEmail, type Dependencias,
+  ejecutarCancel, ejecutarEmit, ejecutarEmitAprobadas, ejecutarNotify, ejecutarPrepare,
+  ejecutarPreviewSii, ejecutarRetryEmail, type Dependencias,
 } from './comandos.js';
 import { logger } from '../services/logger.js';
 
 const RAIZ = process.cwd();
+
+// Modo nube: la auditoría vive en Supabase y los PDFs en su bucket privado.
+// Se activa solo con las credenciales del service role presentes en el entorno.
+const esNube = (): boolean =>
+  Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 // Cache de tokens Microsoft cifrado (la llave vive en el llavero): evita
 // repetir el código de dispositivo en cada comando.
@@ -32,14 +45,38 @@ function cachePluginMsal(rutaDatos: string) {
 
 type Readline = ReturnType<typeof createInterface>;
 
-async function armarDependencias(): Promise<{ deps: Dependencias; repo: FacturasRepository; rutEmisor: string; graph: GraphClient; rutaDatos: string; rl: Readline }> {
+interface Entorno {
+  deps: Dependencias;
+  repo: FacturasRepository;
+  rutEmisor: string;
+  graph: GraphClient;
+  config: Config;
+  rutaDatos: string;
+  rl: Readline;
+  appOnly: boolean;
+}
+
+async function armarDependencias(): Promise<Entorno> {
   const config = await cargarConfig(RAIZ);
   const rutaDatos = join(RAIZ, config.rutaDatos);
+  await mkdir(rutaDatos, { recursive: true });
+  const appOnly = Boolean(process.env.GRAPH_CLIENT_SECRET);
   const graph = new GraphClient(
-    crearAutenticadorDeviceCode({ ...config, cachePlugin: cachePluginMsal(rutaDatos) }),
+    appOnly
+      ? crearAutenticadorClientCredentials({
+          tenantId: config.tenantId,
+          clientId: config.clientId,
+          clientSecret: process.env.GRAPH_CLIENT_SECRET as string,
+        })
+      : crearAutenticadorDeviceCode({ ...config, cachePlugin: cachePluginMsal(rutaDatos) }),
   );
   const excel = new ExcelAdapter(graph, config);
-  const store = new AuditStore(join(rutaDatos, 'agente.sqlite'));
+  const supabase = esNube()
+    ? createClient(process.env.SUPABASE_URL as string, process.env.SUPABASE_SERVICE_ROLE_KEY as string)
+    : null;
+  const store: IAuditStore = supabase
+    ? new AuditStoreSupabase(supabase)
+    : new AuditStore(join(rutaDatos, 'agente.sqlite'));
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const io = {
     pregunta: (mensaje: string) =>
@@ -61,30 +98,38 @@ async function armarDependencias(): Promise<{ deps: Dependencias; repo: Facturas
       rutOperador: config.rutOperador ? (normalizarRut(config.rutOperador) ?? undefined) : undefined,
       leerSecreto: () => leerSecretoKeychain(Object.keys(config.emisores)[0] as string),
       leerClaveFirma: () => leerSecretoKeychain(`${Object.keys(config.emisores)[0] as string}-firma`),
+      headless: process.env.SII_HEADLESS === '1',
     }),
     correo: new MailService(graph, config.buzonPrincipal),
     aprobacion: new ApprovalService(io, () => new Date(), userInfo().username),
     clasificaciones: config.emisores,
-    rutaRaizClientes: config.rutaRaizClientes,
+    pdfs: supabase ? new AlmacenPdfSupabase(supabase) : new AlmacenPdfLocal(config.rutaRaizClientes),
     hoy: () => new Date().toISOString().slice(0, 10),
   };
   const primerEmisor = Object.keys(config.emisores)[0] as string;
-  return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, rutaDatos, rl };
+  return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, config, rutaDatos, rl, appOnly };
 }
 
-async function conEntorno(verificarGraph: boolean, fn: (deps: Dependencias, repo: FacturasRepository) => Promise<void>): Promise<void> {
-  const config = await cargarConfig(RAIZ);
-  const { deps, repo, rutEmisor, graph, rutaDatos, rl } = await armarDependencias();
+async function conEntorno(
+  verificarGraph: boolean,
+  fn: (deps: Dependencias, repo: FacturasRepository, entorno: Entorno) => Promise<void>,
+): Promise<void> {
+  const entorno = await armarDependencias();
+  const { deps, repo, rutEmisor, graph, config, rutaDatos, rl, appOnly } = entorno;
   try {
     await conBloqueo(rutaDatos, async () => {
-      const chequeo = await preflight(config, graph, rutEmisor, { verificarGraph });
+      const chequeo = await preflight(config, graph, rutEmisor, {
+        verificarGraph,
+        appOnly,
+        verificarRutaClientes: !esNube(),
+      });
       if (!chequeo.ok) {
         throw new Error(`Preflight falló:\n- ${chequeo.fallas.join('\n- ')}`);
       }
       await repo.reconciliar();
       // Recuperación: filas huérfanas en EMITIENDO (proceso caído en plena
       // emisión) pasan a REQUIERE_REVISION antes de permitir cualquier acción.
-      const interrumpidas = deps.store.marcarEmisionesInterrumpidas();
+      const interrumpidas = await deps.store.marcarEmisionesInterrumpidas();
       for (const facturaId of interrumpidas) {
         logger.warn(`Emisión interrumpida detectada: ${facturaId}; marcada REQUIERE_REVISION`);
         await repo.reflejar(facturaId, {
@@ -94,10 +139,10 @@ async function conEntorno(verificarGraph: boolean, fn: (deps: Dependencias, repo
         });
       }
       try {
-        await fn(deps, repo);
+        await fn(deps, repo, entorno);
       } finally {
         await deps.sii.cerrar();
-        deps.store.cerrar();
+        await deps.store.cerrar();
       }
     });
   } finally {
@@ -143,6 +188,41 @@ programa
   });
 
 programa
+  .command('notify')
+  .description('Nube: envía la solicitud de aprobación remota (WhatsApp o correo) de cada factura pendiente sin aprobación')
+  .action(async () => {
+    const secreto = process.env.APPROVAL_SECRET;
+    const urlAprobacion = process.env.APPROVAL_URL;
+    if (!secreto || !urlAprobacion) {
+      throw new Error('notify exige APPROVAL_SECRET y APPROVAL_URL en el entorno');
+    }
+    await conEntorno(true, async (deps, _repo, entorno) => {
+      const canal = crearNotificador(process.env, entorno.graph, entorno.config.buzonPrincipal);
+      const notificadas = await ejecutarNotify(deps, canal, {
+        urlAprobacion,
+        secreto,
+        vigenciaHoras: 48,
+        ahora: () => new Date(),
+      });
+      console.log(JSON.stringify({ notificadas }, null, 2));
+    });
+  });
+
+programa
+  .command('emit-approved')
+  .description('Nube: emite únicamente las facturas cuya aprobación remota existe y coincide con el contenido exacto')
+  .action(async () => {
+    await conEntorno(true, async (deps) => {
+      const resultado = await ejecutarEmitAprobadas({
+        ...deps,
+        aprobacion: new AprobacionRemota(deps.store),
+      });
+      console.log(JSON.stringify(resultado, null, 2));
+      if (resultado.fallidas.length > 0) process.exitCode = 1;
+    });
+  });
+
+programa
   .command('cancel')
   .description('Cancela una factura preparada que NO se emitirá por el agente (p. ej. emitida a mano en el portal); exige motivo')
   .requiredOption('--invoice <factura_id>')
@@ -164,12 +244,7 @@ programa
     const empresas = (await excel.leerTabla('tblEmpresas')).map((f) => esquemaEmpresa.parse(f));
     const empresa = empresas.find((e) => e.activo);
     if (!empresa) throw new Error('No hay empresa activa en tblEmpresas');
-    const { mkdtemp, writeFile } = await import('node:fs/promises');
-    const { tmpdir } = await import('node:os');
-    const dir = await mkdtemp(join(tmpdir(), 'prueba-correo-'));
-    const rutaPdf = join(dir, 'documento-de-prueba.pdf');
-    await writeFile(
-      rutaPdf,
+    const pdfPrueba = Buffer.from(
       '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Size 4/Root 1 0 R>>\n%%EOF\n',
     );
     const correo = new MailService(graph, config.buzonPrincipal);
@@ -183,7 +258,8 @@ programa
         `Remitente esperado (alias): ${empresa.email_remitente}\n` +
         'Si el remitente visible en su bandeja NO es ese alias, Exchange lo está reescribiendo ' +
         'y se debe habilitar el envío desde alias antes de operar.',
-      rutaPdf,
+      nombreAdjunto: 'documento-de-prueba.pdf',
+      pdf: pdfPrueba,
     });
     console.log(
       `Correo [PRUEBA] enviado a ${config.buzonPrincipal}. ` +

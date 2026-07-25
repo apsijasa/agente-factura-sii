@@ -8,21 +8,23 @@ import type { ExcelAdapter } from '../adapters/excel/excel-adapter.js';
 import type { UfProvider } from '../adapters/uf/uf-provider.js';
 import { EmisionConfirmadaSinPdfError, type ISiiAdapter } from '../adapters/sii/sii-adapter.js';
 import type { MailService } from '../services/correo.js';
-import type { ApprovalService } from '../services/aprobacion.js';
-import { guardarPdf, rutaFactura } from '../services/storage.js';
+import { resumenAprobacion, type IAprobacion } from '../services/aprobacion.js';
+import { crearToken } from '../services/token-aprobacion.js';
+import type { CanalNotificacion } from '../services/notificador.js';
+import type { AlmacenPdf } from '../services/almacen-pdf.js';
 import { filaExcelDesdePayload } from '../store/facturas-repository.js';
-import type { AuditStore } from '../store/audit-store.js';
+import type { IAuditStore } from '../store/audit-store.js';
 import { logger } from '../services/logger.js';
 
 export interface Dependencias {
-  store: AuditStore;
+  store: IAuditStore;
   excel: ExcelAdapter;
   uf: UfProvider;
   sii: ISiiAdapter;
   correo: MailService;
-  aprobacion: ApprovalService;
+  aprobacion: IAprobacion;
   clasificaciones: Record<string, ClasificacionEmisor>;
-  rutaRaizClientes: string;
+  pdfs: AlmacenPdf;
   hoy: () => string;
 }
 
@@ -48,7 +50,7 @@ export async function ejecutarPrepare(deps: Dependencias, fecha?: string): Promi
   };
 
   for (const grupo of grupos) {
-    if (deps.store.obtenerFactura(grupo.clave)) {
+    if (await deps.store.obtenerFactura(grupo.clave)) {
       resultado.omitidas.push(grupo.clave);
       continue;
     }
@@ -61,14 +63,14 @@ export async function ejecutarPrepare(deps: Dependencias, fecha?: string): Promi
     const requiereUf = grupo.cobros.some((c) => c.moneda === 'UF');
     const uf = requiereUf ? await deps.uf.obtenerValorUf(grupo.fechaProgramada) : null;
     const payload = construirPayload(grupo, empresa, cliente, clasificacion, uf?.valor ?? null);
-    deps.store.crearFactura(payload, hashPayload(payload));
+    await deps.store.crearFactura(payload, hashPayload(payload));
     // Diseño §5 UfProvider: la procedencia del valor UF (valor, fecha, URL de
     // origen y momento de consulta) queda auditada en state_events.
     const detalle = uf
       ? `preparación en simulación; UF ${uf.valor} (${uf.fecha}) de ${uf.url} consultada ${uf.consultadoEn}`
       : 'preparación en simulación';
     if (uf) logger.info({ facturaId: payload.factura_id, uf }, 'valor UF registrado con procedencia');
-    deps.store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', detalle);
+    await deps.store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', detalle);
     await deps.excel.agregarFilaFacturas(filaExcelDesdePayload(payload, 'PENDIENTE_APROBACION'));
     resultado.preparadas.push(payload.factura_id);
   }
@@ -94,23 +96,23 @@ async function reflejarErrorEnExcel(
   }
 }
 
-function payloadDesdeStore(deps: Dependencias, facturaId: string): InvoicePayload {
-  const fila = deps.store.obtenerFactura(facturaId);
+async function payloadDesdeStore(deps: Dependencias, facturaId: string): Promise<InvoicePayload> {
+  const fila = await deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
   return JSON.parse(fila.payload_json) as InvoicePayload;
 }
 
 export async function ejecutarPreviewSii(deps: Dependencias, facturaId: string): Promise<void> {
-  const fila = deps.store.obtenerFactura(facturaId);
+  const fila = await deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
-  const payload = payloadDesdeStore(deps, facturaId);
+  const payload = await payloadDesdeStore(deps, facturaId);
   if (hashPayload(payload) !== fila.payload_hash) {
     throw new Error('El payload cambió desde la preparación; regenerar con prepare');
   }
   await deps.sii.abrirYPreparar(payload);
   const preview = await deps.sii.extraerPreview(payload);
   if (!preview.coinciden) {
-    deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
+    await deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
     await reflejarErrorEnExcel(deps, facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
     throw new Error(`Los totales del SII no coinciden: ${preview.diferencias.join(' | ')}`);
   }
@@ -118,23 +120,23 @@ export async function ejecutarPreviewSii(deps: Dependencias, facturaId: string):
 }
 
 export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promise<void> {
-  const fila = deps.store.obtenerFactura(facturaId);
+  const fila = await deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
   if (fila.estado !== 'PENDIENTE_APROBACION') {
     throw new Error(`La factura está en ${fila.estado}; emit exige PENDIENTE_APROBACION`);
   }
-  const payload = payloadDesdeStore(deps, facturaId);
+  const payload = await payloadDesdeStore(deps, facturaId);
   if (hashPayload(payload) !== fila.payload_hash) {
     throw new Error('El payload cambió desde la preparación; regenerar con prepare');
   }
 
   const carpeta = payload.nombre_carpeta;
-  const rutaPrevista = rutaFactura(deps.rutaRaizClientes, carpeta, payload.fecha_emision, 'PENDIENTE', carpeta);
+  const rutaPrevista = deps.pdfs.rutaPrevista(carpeta, payload.fecha_emision);
 
   await deps.sii.abrirYPreparar(payload);
   const preview = await deps.sii.extraerPreview(payload);
   if (!preview.coinciden) {
-    deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
+    await deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', preview.diferencias.join(' | '));
     await reflejarErrorEnExcel(deps, facturaId, { estado: 'REQUIERE_REVISION', error: preview.diferencias.join(' | ') });
     throw new Error(`Los totales del SII no coinciden; REQUIERE_REVISION: ${preview.diferencias.join(' | ')}`);
   }
@@ -145,7 +147,7 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   }
   // Guarda TOCTOU: la aprobación humana puede tardar minutos; se relee la fila
   // y se verifica que nada cambió entre la aprobación y la emisión.
-  const filaFresca = deps.store.obtenerFactura(facturaId);
+  const filaFresca = await deps.store.obtenerFactura(facturaId);
   if (!filaFresca) {
     throw new Error(`La factura ${facturaId} desapareció durante la aprobación; no se emite`);
   }
@@ -155,9 +157,9 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   if (hashPayload(payload) !== filaFresca.payload_hash) {
     throw new Error('El payload cambió durante la aprobación; no se emite');
   }
-  deps.store.registrarAprobacion(facturaId, aprobacion.actor, filaFresca.payload_hash, aprobacion.fecha);
-  deps.store.registrarTransicion(facturaId, 'APROBADA', `aprobada por ${aprobacion.actor}`);
-  deps.store.registrarTransicion(facturaId, 'EMITIENDO', 'única acción de emisión');
+  await deps.store.registrarAprobacion(facturaId, aprobacion.actor, filaFresca.payload_hash, aprobacion.fecha);
+  await deps.store.registrarTransicion(facturaId, 'APROBADA', `aprobada por ${aprobacion.actor}`);
+  await deps.store.registrarTransicion(facturaId, 'EMITIENDO', 'única acción de emisión');
 
   let emision;
   try {
@@ -171,9 +173,9 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
     // jamás debe volver a pasar por `emitirUnaVez`.
     if (error instanceof EmisionConfirmadaSinPdfError) {
       const detalle = `PDF pendiente: ${error.message}`;
-      deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${error.folio}`);
-      deps.store.guardarFolio(facturaId, error.folio);
-      deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', detalle);
+      await deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${error.folio}`);
+      await deps.store.guardarFolio(facturaId, error.folio);
+      await deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', detalle);
       await reflejarErrorEnExcel(deps, facturaId, {
         estado: 'ERROR_REINTENTABLE', folio_sii: error.folio, error: detalle,
       });
@@ -195,8 +197,8 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
       : `emisión incierta sin folio visible: ${(error as Error).message}${notaConsulta}`;
     // El folio hallado se persiste ANTES de la transición terminal: es la única
     // evidencia de que el documento existe y no puede perderse.
-    if (folioExistente) deps.store.guardarFolio(facturaId, folioExistente);
-    deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', detalle);
+    if (folioExistente) await deps.store.guardarFolio(facturaId, folioExistente);
+    await deps.store.registrarTransicion(facturaId, 'REQUIERE_REVISION', detalle);
     await reflejarErrorEnExcel(deps, facturaId, {
       estado: 'REQUIERE_REVISION',
       error: detalle,
@@ -205,19 +207,19 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
     throw new Error(detalle);
   }
 
-  deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${emision.folio}`);
-  deps.store.guardarFolio(facturaId, emision.folio);
+  await deps.store.registrarTransicion(facturaId, 'EMITIDA', `folio ${emision.folio}`);
+  await deps.store.guardarFolio(facturaId, emision.folio);
 
-  const rutaFinal = rutaFactura(deps.rutaRaizClientes, carpeta, payload.fecha_emision, emision.folio, carpeta);
+  let rutaFinal: string;
   try {
-    await guardarPdf(rutaFinal, emision.pdf);
+    rutaFinal = await deps.pdfs.guardarFactura(carpeta, payload.fecha_emision, emision.folio, emision.pdf);
   } catch (error) {
-    deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `PDF: ${(error as Error).message}`);
+    await deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `PDF: ${(error as Error).message}`);
     await reflejarErrorEnExcel(deps, facturaId, { estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, error: (error as Error).message });
     throw error;
   }
-  deps.store.guardarRutaPdf(facturaId, rutaFinal);
-  deps.store.registrarTransicion(facturaId, 'DESCARGADA', rutaFinal);
+  await deps.store.guardarRutaPdf(facturaId, rutaFinal);
+  await deps.store.registrarTransicion(facturaId, 'DESCARGADA', rutaFinal);
 
   try {
     await deps.correo.enviarFactura({
@@ -226,18 +228,19 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
       copia: payload.copia,
       asunto: `Factura ${emision.folio} — ${payload.razon_social_emisor} — ${payload.periodo}`,
       cuerpo: `Estimados,\n\nAdjuntamos la factura electrónica N° ${emision.folio} correspondiente al período ${payload.periodo}.\n\nSaludos,\n${payload.razon_social_emisor}`,
-      rutaPdf: rutaFinal,
+      nombreAdjunto: rutaFinal.split('/').pop() as string,
+      pdf: emision.pdf,
     });
-    deps.store.registrarIntentoCorreo(facturaId, true, 'enviado');
+    await deps.store.registrarIntentoCorreo(facturaId, true, 'enviado');
   } catch (error) {
-    deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
-    deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `correo: ${(error as Error).message}`);
+    await deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
+    await deps.store.registrarTransicion(facturaId, 'ERROR_REINTENTABLE', `correo: ${(error as Error).message}`);
     await reflejarErrorEnExcel(deps, facturaId, {
       estado: 'ERROR_REINTENTABLE', folio_sii: emision.folio, pdf_path: rutaFinal, error: (error as Error).message,
     });
     throw error;
   }
-  deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado');
+  await deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado');
   await deps.excel.actualizarFilaFacturas(facturaId, {
     estado: 'ENVIADA', folio_sii: emision.folio, pdf_path: rutaFinal,
     aprobada_por: aprobacion.actor, fecha_aprobacion: aprobacion.fecha,
@@ -250,7 +253,7 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
 const ESTADOS_CANCELABLES: readonly string[] = ['BORRADOR', 'PENDIENTE_APROBACION', 'APROBADA'];
 
 export async function ejecutarCancel(deps: Dependencias, facturaId: string, motivo: string): Promise<void> {
-  const fila = deps.store.obtenerFactura(facturaId);
+  const fila = await deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
   const motivoLimpio = motivo.trim();
   if (!motivoLimpio) throw new Error('cancel exige un motivo no vacío (--motivo)');
@@ -259,13 +262,88 @@ export async function ejecutarCancel(deps: Dependencias, facturaId: string, moti
       `La factura está en ${fila.estado} y no se puede cancelar; solo aplica antes de emitir (${ESTADOS_CANCELABLES.join(', ')})`,
     );
   }
-  deps.store.registrarTransicion(facturaId, 'CANCELADA', motivoLimpio);
+  await deps.store.registrarTransicion(facturaId, 'CANCELADA', motivoLimpio);
   await reflejarErrorEnExcel(deps, facturaId, { estado: 'CANCELADA', error: motivoLimpio });
   logger.info({ facturaId, motivo: motivoLimpio }, 'factura cancelada; ninguna ruta automática puede retomarla');
 }
 
+export interface OpcionesNotify {
+  urlAprobacion: string;
+  secreto: string;
+  vigenciaHoras: number;
+  ahora: () => Date;
+}
+
+/**
+ * Ciclo nube (1/2): envía la solicitud de aprobación remota de cada factura
+ * PENDIENTE_APROBACION que aún no tiene aprobación registrada. El enlace lleva
+ * un token firmado ligado al hash del contenido; si el Excel cambia después,
+ * la aprobación no sirve y se re-notifica en el ciclo siguiente.
+ */
+export async function ejecutarNotify(
+  deps: Dependencias,
+  canal: CanalNotificacion,
+  opciones: OpcionesNotify,
+): Promise<string[]> {
+  const notificadas: string[] = [];
+  for (const facturaId of await deps.store.listarFacturaIds()) {
+    const fila = await deps.store.obtenerFactura(facturaId);
+    if (fila?.estado !== 'PENDIENTE_APROBACION') continue;
+    const aprobacion = await deps.store.obtenerAprobacion(facturaId);
+    if (aprobacion && aprobacion.payload_hash === fila.payload_hash) continue;
+    const payload = JSON.parse(fila.payload_json) as InvoicePayload;
+    const expiraEn = new Date(
+      opciones.ahora().getTime() + opciones.vigenciaHoras * 3_600_000,
+    ).toISOString();
+    const token = crearToken(
+      { facturaId, payloadHash: fila.payload_hash, expiraEn },
+      opciones.secreto,
+    );
+    const mensaje =
+      `${resumenAprobacion(payload, deps.pdfs.rutaPrevista(payload.nombre_carpeta, payload.fecha_emision))}\n\n` +
+      `Para APROBAR la emisión de esta factura abra este enlace:\n` +
+      `${opciones.urlAprobacion}?token=${token}\n\n` +
+      `Si NO corresponde emitirla, no haga nada: el enlace expira en ${opciones.vigenciaHoras} horas ` +
+      `y nada se emite sin su aprobación.`;
+    await canal.enviar(mensaje);
+    logger.info({ facturaId }, 'solicitud de aprobación remota enviada');
+    notificadas.push(facturaId);
+  }
+  return notificadas;
+}
+
+export interface ResultadoEmitAprobadas {
+  emitidas: string[];
+  fallidas: string[];
+}
+
+/**
+ * Ciclo nube (2/2): emite únicamente las facturas PENDIENTE_APROBACION cuya
+ * aprobación remota existe y coincide con el hash actual del contenido. Cada
+ * factura se procesa de forma independiente: un fallo no detiene a las demás,
+ * y la fallida queda en el estado que el propio ejecutarEmit le asignó
+ * (REQUIERE_REVISION / ERROR_REINTENTABLE), jamás re-emitible en caliente.
+ */
+export async function ejecutarEmitAprobadas(deps: Dependencias): Promise<ResultadoEmitAprobadas> {
+  const resultado: ResultadoEmitAprobadas = { emitidas: [], fallidas: [] };
+  for (const facturaId of await deps.store.listarFacturaIds()) {
+    const fila = await deps.store.obtenerFactura(facturaId);
+    if (fila?.estado !== 'PENDIENTE_APROBACION') continue;
+    const aprobacion = await deps.store.obtenerAprobacion(facturaId);
+    if (!aprobacion || aprobacion.payload_hash !== fila.payload_hash) continue;
+    try {
+      await ejecutarEmit(deps, facturaId);
+      resultado.emitidas.push(facturaId);
+    } catch (error) {
+      logger.error(`Emisión de ${facturaId} falló: ${(error as Error).message}`);
+      resultado.fallidas.push(facturaId);
+    }
+  }
+  return resultado;
+}
+
 export async function ejecutarRetryEmail(deps: Dependencias, facturaId: string): Promise<void> {
-  const fila = deps.store.obtenerFactura(facturaId);
+  const fila = await deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
   if (!fila.folio_sii || !fila.pdf_path) {
     throw new Error('retry-email exige folio y PDF verificado; no invoca SiiAdapter');
@@ -273,18 +351,20 @@ export async function ejecutarRetryEmail(deps: Dependencias, facturaId: string):
   if (fila.estado !== 'ERROR_REINTENTABLE' && fila.estado !== 'DESCARGADA') {
     throw new Error(`retry-email no aplica en estado ${fila.estado}`);
   }
-  const payload = payloadDesdeStore(deps, facturaId);
+  const payload = await payloadDesdeStore(deps, facturaId);
   try {
+    const pdf = await deps.pdfs.obtener(fila.pdf_path);
     await deps.correo.enviarFactura({
       remitente: payload.remitente,
       destinatarios: payload.destinatarios,
       copia: payload.copia,
       asunto: `Factura ${fila.folio_sii} — ${payload.razon_social_emisor} — ${payload.periodo}`,
       cuerpo: `Estimados,\n\nAdjuntamos la factura electrónica N° ${fila.folio_sii} correspondiente al período ${payload.periodo}.\n\nSaludos,\n${payload.razon_social_emisor}`,
-      rutaPdf: fila.pdf_path,
+      nombreAdjunto: fila.pdf_path.split('/').pop() as string,
+      pdf,
     });
-    deps.store.registrarIntentoCorreo(facturaId, true, 'reintento exitoso');
-    deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado en reintento');
+    await deps.store.registrarIntentoCorreo(facturaId, true, 'reintento exitoso');
+    await deps.store.registrarTransicion(facturaId, 'ENVIADA', 'correo enviado en reintento');
     await deps.excel.actualizarFilaFacturas(facturaId, {
       estado: 'ENVIADA',
       folio_sii: fila.folio_sii,
@@ -293,7 +373,7 @@ export async function ejecutarRetryEmail(deps: Dependencias, facturaId: string):
       error: '',
     });
   } catch (error) {
-    deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
+    await deps.store.registrarIntentoCorreo(facturaId, false, (error as Error).message);
     throw error;
   }
 }

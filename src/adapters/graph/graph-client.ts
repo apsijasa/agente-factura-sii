@@ -1,5 +1,6 @@
 // src/adapters/graph/graph-client.ts
 import {
+  ConfidentialClientApplication,
   PublicClientApplication,
   type AuthenticationResult,
 } from '@azure/msal-node';
@@ -78,6 +79,35 @@ export function crearAutenticadorDeviceCode(opciones: {
       },
     });
     if (!resultado?.accessToken) throw new Error('No se pudo obtener token de Microsoft Graph');
+    return resultado.accessToken;
+  };
+}
+
+/**
+ * Autenticación app-only (client credentials) para ejecución desatendida en la
+ * nube: sin device code ni sesión de usuario. Requiere una aplicación de Entra
+ * con permisos de APLICACIÓN (Files.ReadWrite.All, Mail.Send) con consentimiento
+ * de administrador; el secreto llega por variable de entorno, nunca en código.
+ */
+export function crearAutenticadorClientCredentials(opciones: {
+  tenantId: string;
+  clientId: string;
+  clientSecret: string;
+}): () => Promise<string> {
+  const cca = new ConfidentialClientApplication({
+    auth: {
+      clientId: opciones.clientId,
+      authority: `https://login.microsoftonline.com/${opciones.tenantId}`,
+      clientSecret: opciones.clientSecret,
+    },
+  });
+  return async () => {
+    const resultado = await cca.acquireTokenByClientCredential({
+      scopes: ['https://graph.microsoft.com/.default'],
+    });
+    if (!resultado?.accessToken) {
+      throw new Error('No se pudo obtener token de Microsoft Graph (client credentials)');
+    }
     return resultado.accessToken;
   };
 }

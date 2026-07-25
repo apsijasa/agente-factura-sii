@@ -1,0 +1,59 @@
+# Ciclo nube 1/2: prepara las facturas del día desde el Excel de OneDrive y
+# envía las solicitudes de aprobación remota (WhatsApp o correo).
+# No toca el SII ni emite nada: la emisión vive en emit-approved.yml y solo
+# ocurre después de la aprobación humana.
+name: Preparar y notificar
+
+on:
+  schedule:
+    - cron: '0 11 * * *' # 07:00 Chile (invierno) todos los días
+  workflow_dispatch:
+
+concurrency:
+  group: facturacion-sii
+  cancel-in-progress: false
+
+jobs:
+  prepare-notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+      SII_CLAVE: ${{ secrets.SII_CLAVE }}
+      SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}
+      APPROVAL_SECRET: ${{ secrets.APPROVAL_SECRET }}
+      APPROVAL_URL: ${{ secrets.APPROVAL_URL }}
+      WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+      WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
+      WHATSAPP_TO: ${{ secrets.WHATSAPP_TO }}
+    steps:
+      - name: Verificar configuración
+        run: |
+          if [ -z "$AGENTE_CONFIG_JSON" ] || [ -z "$SUPABASE_URL" ]; then
+            echo "::notice::Secretos aún no configurados (ver docs/nube.md); nada que hacer."
+            echo "CONFIGURADO=no" >> "$GITHUB_ENV"
+          else
+            echo "CONFIGURADO=si" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/checkout@v4
+        if: env.CONFIGURADO == 'si'
+      - uses: pnpm/action-setup@v4
+        if: env.CONFIGURADO == 'si'
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        if: env.CONFIGURADO == 'si'
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: env.CONFIGURADO == 'si'
+      - name: Preparar facturas del día
+        if: env.CONFIGURADO == 'si'
+        run: pnpm agent prepare --mode simulation
+      - name: Enviar solicitudes de aprobación
+        if: env.CONFIGURADO == 'si'
+        run: pnpm agent notify

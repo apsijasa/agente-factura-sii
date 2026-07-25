@@ -38,6 +38,8 @@ páginas reales.
 | `pnpm agent emit --invoice <factura_id>` | Emisión real; exige `APROBAR <factura_id>` |
 | `pnpm agent retry-email --invoice <factura_id>` | Reintenta solo el correo de una factura ya emitida; nunca vuelve a emitir |
 | `pnpm agent cancel --invoice <factura_id> --motivo "<texto>"` | Cancela una factura preparada que no se emitirá por el agente (p. ej. emitida a mano en el portal); solo antes de emitir |
+| `pnpm agent notify` | Nube: envía las solicitudes de aprobación remota (WhatsApp/correo) |
+| `pnpm agent emit-approved` | Nube: emite solo las facturas con aprobación remota vigente |
 | `pnpm agent test-email` | Correo `[PRUEBA]` desde el alias al buzón principal (verificación del alias) |
 
 Todos se ejecutan desde la carpeta del proyecto. Documentación:
@@ -45,6 +47,7 @@ Todos se ejecutan desde la carpeta del proyecto. Documentación:
 - **[docs/manual-de-usuario.md](docs/manual-de-usuario.md)** — guía completa paso a paso (configurar + usar), para el operador
 - [docs/setup.md](docs/setup.md) — configuración inicial (referencia técnica)
 - [docs/operacion.md](docs/operacion.md) — ciclo mensual, referencia del Excel y solución de problemas
+- **[docs/nube.md](docs/nube.md)** — modo nube: GitHub Actions + Supabase + aprobación desde el teléfono, sin tu computador
 
 ## Seguridad
 

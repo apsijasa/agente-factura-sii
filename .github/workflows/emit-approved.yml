@@ -1,0 +1,78 @@
+# Ciclo nube 2/2: emite en el SII únicamente las facturas ya aprobadas por el
+# operador (aprobación remota ligada al hash exacto del contenido).
+# El primer paso es un chequeo barato contra Supabase: si no hay nada aprobado
+# pendiente, el run termina en segundos sin instalar nada.
+name: Emitir aprobadas
+
+on:
+  schedule:
+    - cron: '*/30 12-23 * * *' # cada 30 min, 08:00–19:30 Chile (invierno)
+  workflow_dispatch:
+
+concurrency:
+  group: facturacion-sii
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      hay_trabajo: ${{ steps.chequeo.outputs.hay_trabajo }}
+    steps:
+      - name: ¿Hay facturas aprobadas pendientes de emitir?
+        id: chequeo
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "::notice::Secretos aún no configurados (ver docs/nube.md); nada que hacer."
+            echo "hay_trabajo=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pendientes=$(curl -sf "$SUPABASE_URL/rest/v1/facturas_aprobadas_pendientes?select=factura_id" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          echo "Aprobadas pendientes: $pendientes"
+          if [ "$pendientes" = "[]" ]; then
+            echo "hay_trabajo=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "hay_trabajo=si" >> "$GITHUB_OUTPUT"
+          fi
+
+  emitir:
+    needs: gate
+    if: needs.gate.outputs.hay_trabajo == 'si'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+      SII_CLAVE: ${{ secrets.SII_CLAVE }}
+      SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}
+      SII_HEADLESS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Instalar Chromium para Playwright
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Emitir facturas aprobadas
+        run: pnpm agent emit-approved
+      - name: Guardar evidencia de la sesión SII
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-sii-${{ github.run_id }}
+          path: .data/evidence/
+          if-no-files-found: ignore
+          retention-days: 30

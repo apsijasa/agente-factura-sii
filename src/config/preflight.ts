@@ -13,6 +13,10 @@ export interface ResultadoPreflight {
 export interface OpcionesPreflight {
   verificarGraph: boolean;
   leerSecreto?: (cuenta: string) => Promise<string>;
+  // Autenticación app-only (client credentials): /me no existe; se verifica el buzón.
+  appOnly?: boolean;
+  // En modo nube los PDFs van al bucket; la carpeta local cliente/ no aplica.
+  verificarRutaClientes?: boolean;
 }
 
 export async function preflight(
@@ -29,10 +33,12 @@ export async function preflight(
   } catch (e) {
     fallas.push(`No se pudo crear el directorio de datos ${config.rutaDatos}: ${(e as Error).message}`);
   }
-  try {
-    await access(config.rutaRaizClientes);
-  } catch {
-    fallas.push(`Ruta raíz de clientes inaccesible: ${config.rutaRaizClientes}`);
+  if (opciones.verificarRutaClientes ?? true) {
+    try {
+      await access(config.rutaRaizClientes);
+    } catch {
+      fallas.push(`Ruta raíz de clientes inaccesible: ${config.rutaRaizClientes}`);
+    }
   }
 
   try {
@@ -43,7 +49,7 @@ export async function preflight(
 
   if (opciones.verificarGraph) {
     try {
-      await graph.solicitar('GET', '/me');
+      await graph.solicitar('GET', opciones.appOnly ? `/users/${config.buzonPrincipal}` : '/me');
     } catch (e) {
       fallas.push(`Graph no autenticado o sin permisos: ${(e as Error).message}`);
     }

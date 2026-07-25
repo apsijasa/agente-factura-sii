@@ -47,65 +47,65 @@ function crearStore(): AuditStore {
 }
 
 describe('AuditStore', () => {
-  it('crea la factura en BORRADOR con sus líneas', () => {
+  it('crea la factura en BORRADOR con sus líneas', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    const f = store.obtenerFactura(payload.factura_id);
+    await store.crearFactura(payload, 'hash-abc');
+    const f = await store.obtenerFactura(payload.factura_id);
     expect(f?.estado).toBe('BORRADOR');
     expect(f?.payload_hash).toBe('hash-abc');
-    expect(store.obtenerLineas(payload.factura_id)).toHaveLength(1);
+    expect(await store.obtenerLineas(payload.factura_id)).toHaveLength(1);
   });
 
-  it('rechaza duplicados de la misma clave (idempotencia)', () => {
+  it('rechaza duplicados de la misma clave (idempotencia)', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    expect(() => store.crearFactura(payload, 'hash-abc')).toThrow(/existe/i);
+    await store.crearFactura(payload, 'hash-abc');
+    await expect(store.crearFactura(payload, 'hash-abc')).rejects.toThrow(/existe/i);
   });
 
-  it('registra transiciones válidas y las persiste en state_events', () => {
+  it('registra transiciones válidas y las persiste en state_events', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparación completa');
-    expect(store.obtenerFactura(payload.factura_id)?.estado).toBe('PENDIENTE_APROBACION');
-    const eventos = store.obtenerEventos(payload.factura_id);
+    await store.crearFactura(payload, 'hash-abc');
+    await store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparación completa');
+    expect((await store.obtenerFactura(payload.factura_id))?.estado).toBe('PENDIENTE_APROBACION');
+    const eventos = await store.obtenerEventos(payload.factura_id);
     expect(eventos.map((e) => e.hacia)).toEqual(['BORRADOR', 'PENDIENTE_APROBACION']);
   });
 
-  it('rechaza transiciones inválidas', () => {
+  it('rechaza transiciones inválidas', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    expect(() => store.registrarTransicion(payload.factura_id, 'EMITIDA', 'salto')).toThrow(
+    await store.crearFactura(payload, 'hash-abc');
+    await expect(store.registrarTransicion(payload.factura_id, 'EMITIDA', 'salto')).rejects.toThrow(
       /Transición prohibida/,
     );
   });
 
-  it('registra aprobaciones e intentos de correo', () => {
+  it('registra aprobaciones e intentos de correo', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    store.registrarAprobacion(payload.factura_id, 'andres', 'hash-abc', '2026-07-05T10:00:00Z');
-    store.registrarIntentoCorreo(payload.factura_id, false, 'alias rechazado');
-    expect(store.obtenerAprobacion(payload.factura_id)?.actor).toBe('andres');
-    expect(store.obtenerIntentosCorreo(payload.factura_id)).toHaveLength(1);
+    await store.crearFactura(payload, 'hash-abc');
+    await store.registrarAprobacion(payload.factura_id, 'andres', 'hash-abc', '2026-07-05T10:00:00Z');
+    await store.registrarIntentoCorreo(payload.factura_id, false, 'alias rechazado');
+    expect((await store.obtenerAprobacion(payload.factura_id))?.actor).toBe('andres');
+    expect(await store.obtenerIntentosCorreo(payload.factura_id)).toHaveLength(1);
   });
 
-  it('rechaza la transición si el estado cambió de forma concurrente (CAS)', () => {
+  it('rechaza la transición si el estado cambió de forma concurrente (CAS)', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    const filaObsoleta = store.obtenerFactura(payload.factura_id);
+    await store.crearFactura(payload, 'hash-abc');
+    const filaObsoleta = await store.obtenerFactura(payload.factura_id);
     if (!filaObsoleta) throw new Error('fila no encontrada');
     // Otro proceso cambia el estado directamente en la base de datos.
     const db = (store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db;
     db.prepare('UPDATE invoice_runs SET estado = ? WHERE factura_id = ?').run('CANCELADA', payload.factura_id);
     // Se fuerza la lectura obsoleta (el estado real ya es CANCELADA).
-    vi.spyOn(store, 'obtenerFactura').mockReturnValueOnce(filaObsoleta);
-    expect(() =>
+    vi.spyOn(store, 'obtenerFactura').mockResolvedValueOnce(filaObsoleta);
+    await expect(
       store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'carrera'),
-    ).toThrow(/concurrente|estado cambió/);
+    ).rejects.toThrow(/concurrente|estado cambió/);
     // Sin evento nuevo: solo el de creación.
-    expect(store.obtenerEventos(payload.factura_id)).toHaveLength(1);
+    expect(await store.obtenerEventos(payload.factura_id)).toHaveLength(1);
   });
 
-  it('normaliza el error de clave primaria cuando el pre-chequeo se elude (carrera)', () => {
+  it('normaliza el error de clave primaria cuando el pre-chequeo se elude (carrera)', async () => {
     const store = crearStore();
     // Otro proceso inserta la fila directamente en la base de datos.
     const db = (store as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db;
@@ -113,43 +113,43 @@ describe('AuditStore', () => {
       `INSERT INTO invoice_runs (factura_id, estado, payload_json, payload_hash) VALUES (?, 'BORRADOR', '{}', 'h')`,
     ).run(payload.factura_id);
     // Se simula la carrera: el pre-chequeo no ve la fila y el INSERT choca con la PK.
-    vi.spyOn(store, 'obtenerFactura').mockReturnValueOnce(undefined);
-    expect(() => store.crearFactura(payload, 'hash-abc')).toThrow(/existe/i);
+    vi.spyOn(store, 'obtenerFactura').mockResolvedValueOnce(undefined);
+    await expect(store.crearFactura(payload, 'hash-abc')).rejects.toThrow(/existe/i);
   });
 
-  it('marca las emisiones interrumpidas (EMITIENDO) como REQUIERE_REVISION', () => {
+  it('marca las emisiones interrumpidas (EMITIENDO) como REQUIERE_REVISION', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparada');
-    store.registrarTransicion(payload.factura_id, 'APROBADA', 'aprobada');
-    store.registrarTransicion(payload.factura_id, 'EMITIENDO', 'emisión iniciada');
+    await store.crearFactura(payload, 'hash-abc');
+    await store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 'preparada');
+    await store.registrarTransicion(payload.factura_id, 'APROBADA', 'aprobada');
+    await store.registrarTransicion(payload.factura_id, 'EMITIENDO', 'emisión iniciada');
     // Otra factura en estado no-EMITIENDO no debe ser tocada.
     const otra = { ...payload, factura_id: 'RECURRENT:E1:CL2:2026-07' };
-    store.crearFactura(otra, 'hash-otra');
-    store.registrarTransicion(otra.factura_id, 'PENDIENTE_APROBACION', 'preparada');
+    await store.crearFactura(otra, 'hash-otra');
+    await store.registrarTransicion(otra.factura_id, 'PENDIENTE_APROBACION', 'preparada');
 
-    const interrumpidas = store.marcarEmisionesInterrumpidas();
+    const interrumpidas = await store.marcarEmisionesInterrumpidas();
 
     expect(interrumpidas).toEqual([payload.factura_id]);
-    expect(store.obtenerFactura(payload.factura_id)?.estado).toBe('REQUIERE_REVISION');
-    const ultimo = store.obtenerEventos(payload.factura_id).at(-1);
+    expect((await store.obtenerFactura(payload.factura_id))?.estado).toBe('REQUIERE_REVISION');
+    const ultimo = (await store.obtenerEventos(payload.factura_id)).at(-1);
     expect(ultimo?.detalle).toMatch(/interrumpida/i);
-    expect(store.obtenerFactura(otra.factura_id)?.estado).toBe('PENDIENTE_APROBACION');
+    expect((await store.obtenerFactura(otra.factura_id))?.estado).toBe('PENDIENTE_APROBACION');
   });
 
-  it('marcarEmisionesInterrumpidas no hace nada si no hay filas en EMITIENDO', () => {
+  it('marcarEmisionesInterrumpidas no hace nada si no hay filas en EMITIENDO', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    expect(store.marcarEmisionesInterrumpidas()).toEqual([]);
-    expect(store.obtenerFactura(payload.factura_id)?.estado).toBe('BORRADOR');
+    await store.crearFactura(payload, 'hash-abc');
+    expect(await store.marcarEmisionesInterrumpidas()).toEqual([]);
+    expect((await store.obtenerFactura(payload.factura_id))?.estado).toBe('BORRADOR');
   });
 
-  it('guarda folio y ruta del PDF', () => {
+  it('guarda folio y ruta del PDF', async () => {
     const store = crearStore();
-    store.crearFactura(payload, 'hash-abc');
-    store.guardarFolio(payload.factura_id, '12345');
-    store.guardarRutaPdf(payload.factura_id, '/ruta/Factura_12345.pdf');
-    const f = store.obtenerFactura(payload.factura_id);
+    await store.crearFactura(payload, 'hash-abc');
+    await store.guardarFolio(payload.factura_id, '12345');
+    await store.guardarRutaPdf(payload.factura_id, '/ruta/Factura_12345.pdf');
+    const f = await store.obtenerFactura(payload.factura_id);
     expect(f?.folio_sii).toBe('12345');
     expect(f?.pdf_path).toBe('/ruta/Factura_12345.pdf');
   });

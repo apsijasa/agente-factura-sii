@@ -38,6 +38,12 @@ export const esquemaConfig = z.object({
 export type Config = z.output<typeof esquemaConfig>;
 
 export async function cargarConfig(raizProyecto: string): Promise<Config> {
+  // Modo nube (GitHub Actions): la configuración completa llega por entorno
+  // como secreto del repositorio, sin archivo en disco.
+  const desdeEntorno = process.env.AGENTE_CONFIG_JSON;
+  if (desdeEntorno) {
+    return esquemaConfig.parse(JSON.parse(desdeEntorno));
+  }
   const ruta = join(raizProyecto, '.data', 'config.json');
   let crudo: string;
   try {

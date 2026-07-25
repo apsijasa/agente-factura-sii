@@ -56,6 +56,10 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       leerSecreto?: () => Promise<string>;
       // Clave de firma del documento (llavero); si falta, firma el operador.
       leerClaveFirma?: () => Promise<string>;
+      // Nube: sin pantalla no hay operador mirando; el navegador corre headless
+      // y cualquier verificación extraordinaria (captcha/MFA) hace fallar el
+      // comando de forma segura (REQUIERE_REVISION), jamás se evade.
+      headless?: boolean;
     },
   ) {}
 
@@ -70,7 +74,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     }
     // Navegador VISIBLE: el operador humano completa credencial/certificado/MFA.
     // El agente NUNCA evade CAPTCHA ni MFA (diseño §3.5).
-    this.navegador = await chromium.launch({ headless: false });
+    this.navegador = await chromium.launch({ headless: this.opciones.headless ?? false });
     const contexto = await this.navegador.newContext();
     this.pagina = await contexto.newPage();
     this.pagina.setDefaultTimeout(this.opciones.timeoutMs);

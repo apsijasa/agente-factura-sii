@@ -1,24 +1,15 @@
 // tests/services/correo.test.ts
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { MailService } from '../../src/services/correo.js';
 import type { IGraphClient } from '../../src/adapters/graph/graph-client.js';
 
-function crearPdf(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'correo-'));
-  const ruta = join(dir, 'Factura_12345_NCA_2026-07.pdf');
-  writeFileSync(ruta, '%PDF-1.4\n%%EOF\n');
-  return ruta;
-}
+const PDF = Buffer.from('%PDF-1.4\n%%EOF\n');
 
 describe('MailService.enviarFactura', () => {
   it('envía por Graph desde el alias con destinatarios, copia y adjunto', async () => {
     const solicitar = vi.fn().mockResolvedValue(undefined);
     const graph = { solicitar } as unknown as IGraphClient;
     const servicio = new MailService(graph, 'buzon@empresa.cl');
-    const rutaPdf = crearPdf();
 
     await servicio.enviarFactura({
       remitente: 'facturas@empresa.cl',
@@ -26,7 +17,8 @@ describe('MailService.enviarFactura', () => {
       copia: ['copia@empresa.cl'],
       asunto: 'Factura 12345 — julio 2026',
       cuerpo: 'Adjuntamos la factura del período.',
-      rutaPdf,
+      nombreAdjunto: 'Factura_12345_NCA_2026-07.pdf',
+      pdf: PDF,
     });
 
     expect(solicitar).toHaveBeenCalledTimes(1);
@@ -49,30 +41,22 @@ describe('MailService.enviarFactura', () => {
   it('rechaza un adjunto que supera el tamaño máximo permitido', async () => {
     const graph = { solicitar: vi.fn() } as unknown as IGraphClient;
     const servicio = new MailService(graph, 'buzon@empresa.cl');
-    const dir = mkdtempSync(join(tmpdir(), 'correo-'));
-    const rutaGrande = join(dir, 'grande.pdf');
-    writeFileSync(
-      rutaGrande,
-      Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(3 * 1024 * 1024, 0x20)]),
-    );
+    const grande = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(3 * 1024 * 1024, 0x20)]);
     await expect(
       servicio.enviarFactura({
         remitente: 'f@e.cl', destinatarios: ['a@b.cl'], copia: [],
-        asunto: 'x', cuerpo: 'x', rutaPdf: rutaGrande,
+        asunto: 'x', cuerpo: 'x', nombreAdjunto: 'grande.pdf', pdf: grande,
       }),
     ).rejects.toThrow(/adjunto/i);
   });
 
-  it('rechaza adjuntar un archivo que no es PDF', async () => {
+  it('rechaza adjuntar contenido que no es PDF', async () => {
     const graph = { solicitar: vi.fn() } as unknown as IGraphClient;
     const servicio = new MailService(graph, 'buzon@empresa.cl');
-    const dir = mkdtempSync(join(tmpdir(), 'correo-'));
-    const rutaNoPdf = join(dir, 'x.pdf');
-    writeFileSync(rutaNoPdf, '<html>');
     await expect(
       servicio.enviarFactura({
         remitente: 'f@e.cl', destinatarios: ['a@b.cl'], copia: [],
-        asunto: 'x', cuerpo: 'x', rutaPdf: rutaNoPdf,
+        asunto: 'x', cuerpo: 'x', nombreAdjunto: 'x.pdf', pdf: Buffer.from('<html>'),
       }),
     ).rejects.toThrow(/PDF/);
   });

@@ -7,10 +7,20 @@ const ejecutar = promisify(execFile);
 const SERVICIO = 'agente-factura-sii';
 const CUENTA_CLAVE_CACHE = 'msal-cache-key';
 
+// En la nube (GitHub Actions) no hay llavero: los secretos llegan por
+// variables de entorno (GitHub Secrets) y tienen prioridad si están presentes.
+function secretoDesdeEntorno(cuenta: string): string | undefined {
+  if (cuenta === CUENTA_CLAVE_CACHE) return process.env.MSAL_CACHE_KEY;
+  if (cuenta.endsWith('-firma')) return process.env.SII_CLAVE_FIRMA;
+  return process.env.SII_CLAVE;
+}
+
 // La credencial se guarda una vez con:
 //   security add-generic-password -s agente-factura-sii -a <rut_emisor> -w
 // (el flag -w sin valor pide la contraseña de forma interactiva, sin dejarla en el historial)
 export async function leerSecretoKeychain(cuenta: string): Promise<string> {
+  const delEntorno = secretoDesdeEntorno(cuenta);
+  if (delEntorno) return delEntorno;
   try {
     const { stdout } = await ejecutar('security', [
       'find-generic-password', '-s', SERVICIO, '-a', cuenta, '-w',

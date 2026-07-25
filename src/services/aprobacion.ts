@@ -2,6 +2,7 @@
 import { hashPayload } from '../domain/hash.js';
 import { ocultarRut } from '../domain/rut.js';
 import type { InvoicePayload } from '../domain/tipos.js';
+import type { IAuditStore } from '../store/audit-store.js';
 
 export interface IoAprobacion {
   pregunta(mensaje: string): Promise<string>;
@@ -12,6 +13,15 @@ export interface ResultadoAprobacion {
   hash: string;
   actor: string;
   fecha: string;
+}
+
+/**
+ * Fuente de la aprobación humana: interactiva (terminal local) o remota
+ * (registrada de antemano vía enlace firmado). Ambas garantizan que nada se
+ * emite sin decisión explícita del operador.
+ */
+export interface IAprobacion {
+  solicitarAprobacion(payload: InvoicePayload, rutaPrevista: string): Promise<ResultadoAprobacion>;
 }
 
 const formatoClp = new Intl.NumberFormat('es-CL');
@@ -39,7 +49,7 @@ export function resumenAprobacion(payload: InvoicePayload, rutaPrevista: string)
   ].join('\n');
 }
 
-export class ApprovalService {
+export class ApprovalService implements IAprobacion {
   constructor(
     private readonly io: IoAprobacion,
     private readonly ahora: () => Date,
@@ -58,5 +68,24 @@ export class ApprovalService {
 
   hashVigente(payload: InvoicePayload, hashAprobado: string): boolean {
     return hashPayload(payload) === hashAprobado;
+  }
+}
+
+/**
+ * Aprobación remota asíncrona: el operador ya aprobó desde su teléfono (la
+ * Edge Function `aprobar` validó el token firmado y registró la fila en
+ * `approvals`). Aquí solo se verifica que esa aprobación exista y siga
+ * ligada al contenido exacto de la factura; nunca se aprueba en caliente.
+ */
+export class AprobacionRemota implements IAprobacion {
+  constructor(private readonly store: IAuditStore) {}
+
+  async solicitarAprobacion(payload: InvoicePayload): Promise<ResultadoAprobacion> {
+    const hash = hashPayload(payload);
+    const registrada = await this.store.obtenerAprobacion(payload.factura_id);
+    if (!registrada || registrada.payload_hash !== hash) {
+      return { aprobada: false, hash, actor: registrada?.actor ?? '', fecha: registrada?.aprobado_en ?? '' };
+    }
+    return { aprobada: true, hash, actor: registrada.actor, fecha: registrada.aprobado_en };
   }
 }

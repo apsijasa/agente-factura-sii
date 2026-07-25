@@ -1,6 +1,4 @@
 // src/services/correo.ts
-import { readFile } from 'node:fs/promises';
-import { basename } from 'node:path';
 import type { IGraphClient } from '../adapters/graph/graph-client.js';
 
 // Límite del MVP para adjuntos en línea de Graph sendMail; las sesiones de carga quedan fuera de alcance.
@@ -12,7 +10,9 @@ export interface EnvioFactura {
   copia: string[];
   asunto: string;
   cuerpo: string;
-  rutaPdf: string;
+  // El adjunto viaja en memoria: en la nube el PDF viene del bucket, no del disco.
+  nombreAdjunto: string;
+  pdf: Buffer;
 }
 
 export class MailService {
@@ -22,14 +22,14 @@ export class MailService {
   ) {}
 
   async enviarFactura(envio: EnvioFactura): Promise<void> {
-    const datos = await readFile(envio.rutaPdf);
+    const datos = envio.pdf;
     if (!datos.subarray(0, 5).toString('latin1').startsWith('%PDF')) {
-      throw new Error(`El adjunto no es un PDF válido: ${envio.rutaPdf}`);
+      throw new Error(`El adjunto no es un PDF válido: ${envio.nombreAdjunto}`);
     }
     if (datos.length > MAX_ADJUNTO_BYTES) {
       throw new Error(
         `El adjunto supera el máximo de ${MAX_ADJUNTO_BYTES} bytes: ` +
-          `${envio.rutaPdf} tiene ${datos.length} bytes`,
+          `${envio.nombreAdjunto} tiene ${datos.length} bytes`,
       );
     }
     const aDireccion = (correo: string) => ({ emailAddress: { address: correo } });
@@ -43,7 +43,7 @@ export class MailService {
         attachments: [
           {
             '@odata.type': '#microsoft.graph.fileAttachment',
-            name: basename(envio.rutaPdf),
+            name: envio.nombreAdjunto,
             contentType: 'application/pdf',
             contentBytes: datos.toString('base64'),
           },

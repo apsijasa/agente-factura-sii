@@ -63,7 +63,7 @@ describe('FacturasRepository.reconciliar', () => {
     const { store, repo } = crear([
       { factura_id: payload.factura_id, folio_sii: '', estado: 'BORRADOR' },
     ]);
-    store.crearFactura(payload, 'h');
+    await store.crearFactura(payload, 'h');
     await expect(repo.reconciliar()).resolves.toBeUndefined();
   });
 
@@ -71,18 +71,18 @@ describe('FacturasRepository.reconciliar', () => {
     const { store, repo } = crear([
       { factura_id: payload.factura_id, folio_sii: '999', estado: 'EMITIDA' },
     ]);
-    store.crearFactura(payload, 'h'); // queda en BORRADOR, sin folio
+    await store.crearFactura(payload, 'h'); // queda en BORRADOR, sin folio
     await expect(repo.reconciliar()).rejects.toThrow(/contradicci[oó]n/i);
   });
 
   it('detiene el proceso si SQLite tiene folio y la fila no está en Excel', async () => {
     const { store, repo } = crear([]);
-    store.crearFactura(payload, 'h');
-    store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 't');
-    store.registrarTransicion(payload.factura_id, 'APROBADA', 't');
-    store.registrarTransicion(payload.factura_id, 'EMITIENDO', 't');
-    store.registrarTransicion(payload.factura_id, 'EMITIDA', 't');
-    store.guardarFolio(payload.factura_id, '777');
+    await store.crearFactura(payload, 'h');
+    await store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 't');
+    await store.registrarTransicion(payload.factura_id, 'APROBADA', 't');
+    await store.registrarTransicion(payload.factura_id, 'EMITIENDO', 't');
+    await store.registrarTransicion(payload.factura_id, 'EMITIDA', 't');
+    await store.guardarFolio(payload.factura_id, '777');
     await expect(repo.reconciliar()).rejects.toThrow(/contradicci[oó]n/i);
   });
 
@@ -90,12 +90,12 @@ describe('FacturasRepository.reconciliar', () => {
     const { store, repo } = crear([
       { factura_id: payload.factura_id, folio_sii: '999', estado: 'EMITIDA' },
     ]);
-    store.crearFactura(payload, 'h');
-    store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 't');
-    store.registrarTransicion(payload.factura_id, 'APROBADA', 't');
-    store.registrarTransicion(payload.factura_id, 'EMITIENDO', 't');
-    store.registrarTransicion(payload.factura_id, 'EMITIDA', 't');
-    store.guardarFolio(payload.factura_id, '777');
+    await store.crearFactura(payload, 'h');
+    await store.registrarTransicion(payload.factura_id, 'PENDIENTE_APROBACION', 't');
+    await store.registrarTransicion(payload.factura_id, 'APROBADA', 't');
+    await store.registrarTransicion(payload.factura_id, 'EMITIENDO', 't');
+    await store.registrarTransicion(payload.factura_id, 'EMITIDA', 't');
+    await store.guardarFolio(payload.factura_id, '777');
     await expect(repo.reconciliar()).rejects.toThrow(/contradicci[oó]n/i);
   });
 
@@ -103,7 +103,7 @@ describe('FacturasRepository.reconciliar', () => {
     const { store, repo } = crear([
       { factura_id: payload.factura_id, folio_sii: '   ', estado: 'BORRADOR' },
     ]);
-    store.crearFactura(payload, 'h'); // sin folio en SQLite
+    await store.crearFactura(payload, 'h'); // sin folio en SQLite
     await expect(repo.reconciliar()).resolves.toBeUndefined();
   });
 });
