@@ -340,10 +340,23 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       const limite = Date.now() + this.opciones.timeoutMs;
       let encontrado: string | null = null;
       while (Date.now() < limite && !encontrado) {
-        for (const abierta of contexto.pages()) {
-          if (abierta.isClosed()) continue;
+        const abiertas = contexto.pages().filter((p) => !p.isClosed());
+        if (abiertas.length === 0 || !this.navegador?.isConnected()) {
+          throw new Error(
+            'RESPUESTA_INCIERTA: la ventana del SII se cerró antes de confirmar el folio. ' +
+              'NO cierre la ventana durante la emisión: el agente la cierra solo al terminar.',
+          );
+        }
+        for (const abierta of abiertas) {
+          // 1) Folio como texto visible ("Folio N° 36").
           const texto = await abierta.innerText('body').catch(() => '');
-          const m = SELECTORES.folioEnConfirmacion.exec(texto);
+          let m = SELECTORES.folioEnConfirmacion.exec(texto);
+          // 2) Folio en enlaces/HTML (ej. mipeShowDte.cgi?...&FOLIO=36) — cubre
+          //    confirmaciones que muestran el DTE como PDF embebido.
+          if (!m) {
+            const html = await abierta.content().catch(() => '');
+            m = /FOLIO\s*=\s*(\d+)/i.exec(html);
+          }
           if (m) {
             encontrado = m[1] as string;
             paginaConfirmacion = abierta;
