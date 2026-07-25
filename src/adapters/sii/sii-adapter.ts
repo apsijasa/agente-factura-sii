@@ -51,6 +51,8 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       // La clave se obtiene al momento de usarla y nunca se registra en logs.
       rutOperador?: string;
       leerSecreto?: () => Promise<string>;
+      // Clave de firma del documento (llavero); si falta, firma el operador.
+      leerClaveFirma?: () => Promise<string>;
     },
   ) {}
 
@@ -218,6 +220,24 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     }
   }
 
+  // Página "Firma de Documento Electronico": ingresa la clave de firma desde
+  // el llavero y pulsa el botón de firma. Devuelve true si firmó. Nunca
+  // registra la clave y ante cualquier diferencia cede el control al operador.
+  private async intentarFirmaAutomatica(pagina: Page): Promise<boolean> {
+    const { leerClaveFirma } = this.opciones;
+    if (!leerClaveFirma) return false;
+    try {
+      await pagina.locator(SELECTORES.firmaClave).waitFor({ timeout: 15000 });
+      const clave = await leerClaveFirma();
+      await pagina.locator(SELECTORES.firmaClave).fill(clave);
+      await pagina.locator(SELECTORES.firmaBoton).click();
+      console.log('Documento firmado automáticamente; esperando la confirmación con el folio…');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // Selecciona la empresa emisora en mipeSelEmpresa.cgi buscándola por su RUT
   // (con y sin puntos). Si la página no coincide con lo esperado, guarda
   // evidencia y cede el clic al operador.
@@ -304,11 +324,16 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     try {
       await pagina.waitForLoadState('networkidle').catch(() => undefined);
       await this.guardarEvidencia(pagina, 'post-firmar');
-      console.log(
-        'Si el SII solicita su clave o certificado para firmar, complételo en la ventana ' +
-          '(puede abrirse una ventana nueva; NO cierre ninguna). ' +
-          'El agente esperará la confirmación con el folio…',
-      );
+      // Firma automática si la página de firma es la conocida y la clave está
+      // en el llavero; ante cualquier diferencia, firma el operador.
+      const firmado = await this.intentarFirmaAutomatica(pagina);
+      if (!firmado) {
+        console.log(
+          'Si el SII solicita su clave o certificado para firmar, complételo en la ventana ' +
+            '(puede abrirse una ventana nueva; NO cierre ninguna). ' +
+            'El agente esperará la confirmación con el folio…',
+        );
+      }
       // La firma puede ocurrir en una ventana emergente: buscar el folio en
       // TODAS las páginas abiertas del navegador, tolerando cierres parciales.
       const contexto = pagina.context();

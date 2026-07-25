@@ -60,6 +60,7 @@ async function armarDependencias(): Promise<{ deps: Dependencias; repo: Facturas
       ciudadEmisor: Object.values(config.emisores)[0]?.ciudadEmisor,
       rutOperador: config.rutOperador ? (normalizarRut(config.rutOperador) ?? undefined) : undefined,
       leerSecreto: () => leerSecretoKeychain(Object.keys(config.emisores)[0] as string),
+      leerClaveFirma: () => leerSecretoKeychain(`${Object.keys(config.emisores)[0] as string}-firma`),
     }),
     correo: new MailService(graph, config.buzonPrincipal),
     aprobacion: new ApprovalService(io, () => new Date(), userInfo().username),

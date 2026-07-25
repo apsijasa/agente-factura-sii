@@ -42,6 +42,9 @@ export const SELECTORES = {
   previewIva: 'input[name="EFXP_IVA"]',
   previewTotal: 'input[name="EFXP_MNT_TOTAL"]',
   botonEmitir: 'input[name="btnSign"]', // "Firmar" — única acción de emisión
+  // Página "Firma de Documento Electronico" (calibrada con evidencia 2026-07-24):
+  firmaClave: '#myPass',
+  firmaBoton: '#btnFirma',
   urlVistaPrevia: /mipeDisplayPreView/i,
   folioEnConfirmacion: /folio\s*n?[°º]?\s*(\d+)/i,
   enlacePdf: { rol: 'link', nombre: /ver documento|pdf/i },
