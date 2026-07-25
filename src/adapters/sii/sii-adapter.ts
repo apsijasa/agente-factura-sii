@@ -41,6 +41,9 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
   private navegador: Browser | null = null;
   private pagina: Page | null = null;
   private ultimoDialogo: string | null = null;
+  // Folio visto pasar en cualquier navegación (el portal puede cerrar la
+  // ventana solo, inmediatamente después de confirmar).
+  private ultimoFolioVisto: string | null = null;
 
   constructor(
     private readonly opciones: {
@@ -77,6 +80,17 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       this.ultimoDialogo = dialogo.message();
       void dialogo.accept().catch(() => undefined);
     });
+    // Vigilancia pasiva de folio en TODAS las páginas y navegaciones del
+    // contexto: si una URL trae FOLIO=NNN, se registra aunque el portal
+    // cierre la ventana un instante después.
+    const vigilar = (p: Page) => {
+      p.on('framenavigated', (marco) => {
+        const m = /FOLIO\s*=\s*(\d+)/i.exec(marco.url());
+        if (m) this.ultimoFolioVisto = m[1] as string;
+      });
+    };
+    vigilar(this.pagina);
+    contexto.on('page', vigilar);
     return this.pagina;
   }
 
@@ -312,6 +326,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
 
   async emitirUnaVez(): Promise<ResultadoEmision> {
     const pagina = await this.paginaActiva();
+    this.ultimoFolioVisto = null;
     // ÚNICA acción de emisión. Sin reintentos automáticos (diseño §10).
     await pagina.locator(SELECTORES.botonEmitir).click();
 
@@ -340,11 +355,16 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       const limite = Date.now() + this.opciones.timeoutMs;
       let encontrado: string | null = null;
       while (Date.now() < limite && !encontrado) {
+        // El folio pudo pasar en una navegación fugaz (vigilancia pasiva).
+        if (this.ultimoFolioVisto) {
+          encontrado = this.ultimoFolioVisto;
+          break;
+        }
         const abiertas = contexto.pages().filter((p) => !p.isClosed());
         if (abiertas.length === 0 || !this.navegador?.isConnected()) {
           throw new Error(
-            'RESPUESTA_INCIERTA: la ventana del SII se cerró antes de confirmar el folio. ' +
-              'NO cierre la ventana durante la emisión: el agente la cierra solo al terminar.',
+            'RESPUESTA_INCIERTA: la ventana del SII se cerró antes de confirmar el folio ' +
+              '(el portal puede cerrarla solo). Verifique documentos emitidos en el SII.',
           );
         }
         for (const abierta of abiertas) {
