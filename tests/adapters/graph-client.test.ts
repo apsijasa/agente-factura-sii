@@ -62,3 +62,15 @@ describe('GraphClient', () => {
     expect(obtenerToken).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('GraphClient respuestas sin cuerpo', () => {
+  it('trata 202 Accepted (sendMail) como éxito sin parsear JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('', { status: 202 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const cliente = new GraphClient(async () => 'token-abc');
+    await expect(cliente.solicitar('POST', '/users/x/sendMail', { message: {} })).resolves.toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+});

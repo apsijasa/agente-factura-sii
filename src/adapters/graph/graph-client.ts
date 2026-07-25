@@ -36,8 +36,11 @@ export class GraphClient implements IGraphClient {
             `HTTP ${respuesta.status} en ${metodo} ${ruta}: ${detalle.slice(0, 300)}`,
           );
         }
-        if (respuesta.status === 204) return undefined as T;
-        return (await respuesta.json()) as T;
+        // Respuestas sin cuerpo (204 No Content, 202 Accepted de sendMail, o
+        // cualquier body vacío) no se parsean como JSON.
+        if (respuesta.status === 204 || respuesta.status === 202) return undefined as T;
+        const texto = await respuesta.text();
+        return (texto ? JSON.parse(texto) : undefined) as T;
       },
       { intentos: 3, baseMs: 500 },
     );
