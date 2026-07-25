@@ -7,3 +7,6 @@ coverage/
 playwright/.auth/
 test-results/
 .DS_Store
+
+# Facturas reales emitidas: jamás salen de esta máquina
+cliente/
