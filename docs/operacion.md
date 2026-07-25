@@ -110,6 +110,7 @@ existe ningún camino de vuelta hacia una nueva emisión.
 | `prepare` no encuentra nada | El `dia_emision` no coincide con la fecha pedida; usar `--date` del día correcto |
 | `Aprobación denegada o texto incorrecto` | Se escribió el `APROBAR ...` incompleto; volver a correr `emit` y pegar la línea completa |
 | Correo falla o alias reescrito | La factura queda con folio y PDF a salvo; arreglar el alias/red y `pnpm agent retry-email --invoice <id>` |
+| Factura preparada que se emitió a mano en el portal (u otro motivo para no emitirla) | `pnpm agent cancel --invoice <id> --motivo "<texto>"`; queda `CANCELADA` en la auditoría y en `tblFacturas`. Solo aplica antes de emitir |
 | Factura en `REQUIERE_REVISION` | **Primero** verificar en el SII (documentos emitidos) si el documento existe. Si NO existe: avisar para limpiar y regenerar. Si SÍ existe: avisar para adoptar el folio en la auditoría — jamás re-emitir |
 | El SII pide captcha/verificación | Resolverla a mano en la ventana; el agente espera |
 | Pide de nuevo el código de Microsoft | Normal solo la primera vez o si el cache expiró; una vez y queda guardado |

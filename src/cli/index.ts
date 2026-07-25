@@ -18,7 +18,7 @@ import { AuditStore } from '../store/audit-store.js';
 import { FacturasRepository } from '../store/facturas-repository.js';
 import { conBloqueo } from './lock.js';
 import {
-  ejecutarEmit, ejecutarPrepare, ejecutarPreviewSii, ejecutarRetryEmail, type Dependencias,
+  ejecutarCancel, ejecutarEmit, ejecutarPrepare, ejecutarPreviewSii, ejecutarRetryEmail, type Dependencias,
 } from './comandos.js';
 import { logger } from '../services/logger.js';
 
@@ -140,6 +140,15 @@ programa
   .requiredOption('--invoice <factura_id>')
   .action(async (opciones: { invoice: string }) => {
     await conEntorno(true, (deps) => ejecutarRetryEmail(deps, opciones.invoice));
+  });
+
+programa
+  .command('cancel')
+  .description('Cancela una factura preparada que NO se emitirá por el agente (p. ej. emitida a mano en el portal); exige motivo')
+  .requiredOption('--invoice <factura_id>')
+  .requiredOption('--motivo <texto>', 'motivo de la cancelación (queda en la auditoría y en tblFacturas)')
+  .action(async (opciones: { invoice: string; motivo: string }) => {
+    await conEntorno(true, (deps) => ejecutarCancel(deps, opciones.invoice, opciones.motivo));
   });
 
 programa

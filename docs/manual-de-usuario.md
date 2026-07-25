@@ -299,7 +299,7 @@ firmar. Útil para revisar un cliente nuevo antes del día real.
 | `ENVIADA` | Correo enviado — ciclo completo ✅ |
 | `ERROR_REINTENTABLE` | Falló correo/PDF; se recupera con `retry-email` |
 | `REQUIERE_REVISION` | Necesita revisión humana; nada automático puede re-emitirla |
-| `CANCELADA` | Descartada antes de emitir |
+| `CANCELADA` | Descartada antes de emitir, con `pnpm agent cancel --invoice <factura_id> --motivo "<texto>"` (p. ej. porque la emitiste a mano en el portal) |
 
 ---
 

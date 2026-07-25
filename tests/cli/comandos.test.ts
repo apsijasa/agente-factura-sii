@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { ejecutarPrepare, ejecutarEmit, ejecutarPreviewSii, ejecutarRetryEmail } from '../../src/cli/comandos.js';
+import { ejecutarCancel, ejecutarPrepare, ejecutarEmit, ejecutarPreviewSii, ejecutarRetryEmail } from '../../src/cli/comandos.js';
 import { AuditStore } from '../../src/store/audit-store.js';
 import { EmisionConfirmadaSinPdfError } from '../../src/adapters/sii/sii-adapter.js';
 import type { Dependencias } from '../../src/cli/comandos.js';
@@ -183,6 +183,51 @@ describe('ejecutarPreviewSii', () => {
     expect((deps.sii.extraerPreview as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
     expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('PENDIENTE_APROBACION');
+  });
+});
+
+describe('ejecutarCancel', () => {
+  it('cancela una factura PENDIENTE_APROBACION con motivo, sin tocar SII ni correo', async () => {
+    const deps = dependenciasSimuladas();
+    await ejecutarPrepare(deps, '2026-07-05');
+    await ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', 'emitida manualmente en el portal');
+    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    expect(f?.estado).toBe('CANCELADA');
+    const eventos = deps.store.obtenerEventos('RECURRENT:E1:CL1:2026-07');
+    expect(eventos.at(-1)?.hacia).toBe('CANCELADA');
+    expect(eventos.at(-1)?.detalle).toContain('emitida manualmente en el portal');
+    expect((deps.excel.actualizarFilaFacturas as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+      'RECURRENT:E1:CL1:2026-07',
+      expect.objectContaining({ estado: 'CANCELADA' }),
+    );
+    expect((deps.sii.abrirYPreparar as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect((deps.correo.enviarFactura as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('exige un motivo no vacío', async () => {
+    const deps = dependenciasSimuladas();
+    await ejecutarPrepare(deps, '2026-07-05');
+    await expect(ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', '   ')).rejects.toThrow(/motivo/i);
+    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('PENDIENTE_APROBACION');
+  });
+
+  it('rechaza cancelar una factura ya emitida (estado terminal con folio)', async () => {
+    const deps = dependenciasSimuladas();
+    await ejecutarPrepare(deps, '2026-07-05');
+    await ejecutarEmit(deps, 'RECURRENT:E1:CL1:2026-07');
+    await expect(ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', 'motivo')).rejects.toThrow(/ENVIADA|no se puede cancelar/i);
+    const f = deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07');
+    expect(f?.estado).toBe('ENVIADA');
+    expect(f?.folio_sii).toBe('12345');
+  });
+
+  it('la cancelación en SQLite prevalece aunque falle el reflejo en Excel', async () => {
+    const deps = dependenciasSimuladas();
+    await ejecutarPrepare(deps, '2026-07-05');
+    (deps.excel.actualizarFilaFacturas as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Graph caído'));
+    await ejecutarCancel(deps, 'RECURRENT:E1:CL1:2026-07', 'emitida manualmente');
+    expect(deps.store.obtenerFactura('RECURRENT:E1:CL1:2026-07')?.estado).toBe('CANCELADA');
   });
 });
 

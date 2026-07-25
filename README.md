@@ -37,6 +37,7 @@ páginas reales.
 | `pnpm agent preview-sii --invoice <factura_id>` | Ensayo real en el SII: llena y valida, compara totales y se detiene antes de firmar |
 | `pnpm agent emit --invoice <factura_id>` | Emisión real; exige `APROBAR <factura_id>` |
 | `pnpm agent retry-email --invoice <factura_id>` | Reintenta solo el correo de una factura ya emitida; nunca vuelve a emitir |
+| `pnpm agent cancel --invoice <factura_id> --motivo "<texto>"` | Cancela una factura preparada que no se emitirá por el agente (p. ej. emitida a mano en el portal); solo antes de emitir |
 | `pnpm agent test-email` | Correo `[PRUEBA]` desde el alias al buzón principal (verificación del alias) |
 
 Todos se ejecutan desde la carpeta del proyecto. Documentación:

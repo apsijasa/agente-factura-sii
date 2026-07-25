@@ -245,6 +245,25 @@ export async function ejecutarEmit(deps: Dependencias, facturaId: string): Promi
   });
 }
 
+// Estados desde los que la máquina de estados admite CANCELADA; en todos ellos
+// la factura aún no pasó por `emitirUnaVez`, así que cancelar nunca oculta un folio.
+const ESTADOS_CANCELABLES: readonly string[] = ['BORRADOR', 'PENDIENTE_APROBACION', 'APROBADA'];
+
+export async function ejecutarCancel(deps: Dependencias, facturaId: string, motivo: string): Promise<void> {
+  const fila = deps.store.obtenerFactura(facturaId);
+  if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
+  const motivoLimpio = motivo.trim();
+  if (!motivoLimpio) throw new Error('cancel exige un motivo no vacío (--motivo)');
+  if (!ESTADOS_CANCELABLES.includes(fila.estado)) {
+    throw new Error(
+      `La factura está en ${fila.estado} y no se puede cancelar; solo aplica antes de emitir (${ESTADOS_CANCELABLES.join(', ')})`,
+    );
+  }
+  deps.store.registrarTransicion(facturaId, 'CANCELADA', motivoLimpio);
+  await reflejarErrorEnExcel(deps, facturaId, { estado: 'CANCELADA', error: motivoLimpio });
+  logger.info({ facturaId, motivo: motivoLimpio }, 'factura cancelada; ninguna ruta automática puede retomarla');
+}
+
 export async function ejecutarRetryEmail(deps: Dependencias, facturaId: string): Promise<void> {
   const fila = deps.store.obtenerFactura(facturaId);
   if (!fila) throw new Error(`Factura no encontrada: ${facturaId}`);
