@@ -1,12 +1,13 @@
-node_modules/
-dist/
-coverage/
-.env
-.data/
-*.sqlite*
-playwright/.auth/
-test-results/
-.DS_Store
 
 # Facturas reales emitidas: jamás salen de esta máquina
+*.sqlite*
+.DS_Store
+.data/
+.env
 cliente/
+coverage/
+dist/
+graphify-out/
+node_modules/
+playwright/.auth/
+test-results/
