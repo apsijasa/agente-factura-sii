@@ -48,10 +48,14 @@ export async function preflight(
   }
 
   if (opciones.verificarGraph) {
-    try {
-      await graph.solicitar('GET', opciones.appOnly ? `/users/${config.buzonPrincipal}` : '/me');
-    } catch (e) {
-      fallas.push(`Graph no autenticado o sin permisos: ${(e as Error).message}`);
+    // App-only: /me no existe y /users/<buzon> exigiría User.Read.All; el
+    // chequeo del libro de OneDrive (abajo) ya prueba token y permisos.
+    if (!opciones.appOnly) {
+      try {
+        await graph.solicitar('GET', '/me');
+      } catch (e) {
+        fallas.push(`Graph no autenticado o sin permisos: ${(e as Error).message}`);
+      }
     }
     try {
       await graph.solicitar('GET', `/drives/${config.driveId}/items/${config.itemId}`);

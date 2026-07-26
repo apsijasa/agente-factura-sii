@@ -95,6 +95,18 @@ describe('preflight', () => {
     expect(registro).toEqual(['GET /me', 'GET /drives/D1/items/I1']);
   });
 
+  it('en modo app-only omite /me y solo verifica el libro de OneDrive', async () => {
+    const registro: string[] = [];
+    const config = await configBase();
+    const resultado = await preflight(config, graphFalso(registro), '12345678-5', {
+      verificarGraph: true,
+      appOnly: true,
+      leerSecreto: secretoOk,
+    });
+    expect(resultado.ok).toBe(true);
+    expect(registro).toEqual(['GET /drives/D1/items/I1']);
+  });
+
   it('agrega fallas de Graph cuando las solicitudes fallan', async () => {
     const grafFalla: IGraphClient = {
       async solicitar<T>(): Promise<T> {
