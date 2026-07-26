@@ -13,9 +13,10 @@ import { MailService } from '../services/correo.js';
 import { AprobacionRemota } from '../services/aprobacion.js';
 import { crearNotificador } from '../services/notificador.js';
 import { cachePluginMsal, conEntorno, RAIZ } from './entorno.js';
+import { SolicitudesSupabase } from '../store/solicitudes-supabase.js';
 import {
   ejecutarCancel, ejecutarEmit, ejecutarEmitAprobadas, ejecutarNotify, ejecutarPrepare,
-  ejecutarPreviewSii, ejecutarRetryEmail,
+  ejecutarPreviewSii, ejecutarProcesarSolicitudes, ejecutarRetryEmail,
 } from './comandos.js';
 import { logger } from '../services/logger.js';
 
@@ -73,6 +74,29 @@ programa
         ahora: () => new Date(),
       });
       console.log(JSON.stringify({ notificadas }, null, 2));
+    });
+  });
+
+programa
+  .command('procesar-solicitudes')
+  .description('Nube: convierte las solicitudes /factura de Telegram en facturas PENDIENTE_APROBACION y envía sus enlaces de aprobación')
+  .action(async () => {
+    const secreto = process.env.APPROVAL_SECRET;
+    const urlAprobacion = process.env.APPROVAL_URL;
+    if (!secreto || !urlAprobacion) {
+      throw new Error('procesar-solicitudes exige APPROVAL_SECRET y APPROVAL_URL en el entorno');
+    }
+    await conEntorno(true, async (deps, _repo, entorno) => {
+      if (!entorno.supabase) throw new Error('procesar-solicitudes requiere modo nube (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)');
+      const canal = crearNotificador(process.env, entorno.graph, entorno.config.buzonPrincipal);
+      const resultado = await ejecutarProcesarSolicitudes(deps, new SolicitudesSupabase(entorno.supabase), canal);
+      const notificadas = await ejecutarNotify(deps, canal, {
+        urlAprobacion,
+        secreto,
+        vigenciaHoras: 48,
+        ahora: () => new Date(),
+      });
+      console.log(JSON.stringify({ ...resultado, notificadas }, null, 2));
     });
   });
 

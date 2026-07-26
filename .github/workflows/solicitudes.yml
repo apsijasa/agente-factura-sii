@@ -1,0 +1,71 @@
+# Facturas puntuales por Telegram: convierte las solicitudes /factura en
+# facturas PENDIENTE_APROBACION y envía el enlace de aprobación.
+# El primer paso es un chequeo barato: si no hay solicitudes NUEVA, el run
+# termina en segundos sin instalar nada.
+name: Procesar solicitudes de Telegram
+
+on:
+  schedule:
+    - cron: '10,40 11-23 * * *' # cada 30 min (desfasado del ciclo de emisión), 07:10–19:40 Chile
+  workflow_dispatch:
+
+concurrency:
+  group: facturacion-sii
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      hay_trabajo: ${{ steps.chequeo.outputs.hay_trabajo }}
+    steps:
+      - name: ¿Hay solicitudes nuevas?
+        id: chequeo
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "::notice::Secretos aún no configurados; nada que hacer."
+            echo "hay_trabajo=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          nuevas=$(curl -sf "$SUPABASE_URL/rest/v1/solicitudes_facturas?estado=eq.NUEVA&select=id" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          echo "Solicitudes nuevas: $nuevas"
+          if [ "$nuevas" = "[]" ]; then
+            echo "hay_trabajo=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "hay_trabajo=si" >> "$GITHUB_OUTPUT"
+          fi
+
+  procesar:
+    needs: gate
+    if: needs.gate.outputs.hay_trabajo == 'si'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+      SII_CLAVE: ${{ secrets.SII_CLAVE }}
+      SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}
+      APPROVAL_SECRET: ${{ secrets.APPROVAL_SECRET }}
+      APPROVAL_URL: ${{ secrets.APPROVAL_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Procesar solicitudes y enviar aprobaciones
+        run: pnpm agent procesar-solicitudes

@@ -139,6 +139,42 @@ errores ruidosos).
 3. Actions → "Emitir aprobadas" → **Run workflow** (o espera al próximo ciclo
    de 30 min). Revisa el resumen del run y el PDF en el bucket.
 
+## Facturas puntuales por Telegram (/factura)
+
+Para servicios de una sola vez no necesitas tocar el Excel: le escribes al bot.
+
+```
+/factura <cliente> <monto> <descripción>
+```
+
+Ejemplos:
+
+- `/factura CLI-022 250000 Asesoría contable julio` — CLP, monto NETO sin IVA
+- `/factura "SOCIEDAD PM" 250000 Asesoría contable` — cliente por nombre
+- `/factura CLI-025 33,5UF Consultoría especial` — monto en UF del día
+
+El flujo: el bot registra la solicitud → el agente la valida contra
+`tblClientes` (el cliente debe existir y estar activo), calcula IVA/UF y crea
+la factura `PUNTUAL:...` en `PENDIENTE_APROBACION` → te llega el resumen con
+el enlace de aprobación → apruebas → se emite en el próximo ciclo. **Nada se
+emite sin tu aprobación**, igual que siempre. Si la solicitud tiene un error
+(cliente inexistente, monto malo), el bot te responde explicando qué corregir.
+
+Configuración (una vez):
+
+1. En Supabase → Edge Functions → Secrets, agregar:
+   - `TELEGRAM_BOT_TOKEN` (el mismo token del bot)
+   - `TELEGRAM_CHAT_ID` (tu chat id)
+   - `TELEGRAM_WEBHOOK_SECRET` (un secreto nuevo: `openssl rand -hex 16`)
+2. Registrar el webhook del bot (una sola vez, reemplazando TOKEN y SECRETO):
+
+```bash
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://ivhvatrfqkrrmnkdjctn.supabase.co/functions/v1/telegram-webhook&secret_token=<SECRETO>"
+```
+
+El workflow "Procesar solicitudes de Telegram" corre cada 30 minutos con un
+chequeo barato (segundos si no hay solicitudes).
+
 ## Cómo se decide el modo (local vs nube)
 
 El mismo código sirve para ambos; el modo se activa por variables de entorno:

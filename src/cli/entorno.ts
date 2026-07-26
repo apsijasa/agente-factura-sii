@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import { userInfo } from 'node:os';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { cargarConfig, type Config } from '../config/config.js';
 import { leerSecretoKeychain, obtenerOCrearClaveCifrado } from '../config/keychain.js';
 import { crearCachePluginCifrado } from '../adapters/graph/token-cache.js';
@@ -53,6 +53,7 @@ export interface Entorno {
   rutaDatos: string;
   rl: Readline;
   appOnly: boolean;
+  supabase: SupabaseClient | null;
 }
 
 export async function armarDependencias(): Promise<Entorno> {
@@ -109,7 +110,7 @@ export async function armarDependencias(): Promise<Entorno> {
     hoy: () => new Date().toISOString().slice(0, 10),
   };
   const primerEmisor = Object.keys(config.emisores)[0] as string;
-  return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, config, rutaDatos, rl, appOnly };
+  return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, config, rutaDatos, rl, appOnly, supabase };
 }
 
 export async function conEntorno(

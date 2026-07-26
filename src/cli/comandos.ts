@@ -11,6 +11,11 @@ import type { MailService } from '../services/correo.js';
 import { resumenAprobacion, type IAprobacion } from '../services/aprobacion.js';
 import { crearToken } from '../services/token-aprobacion.js';
 import type { CanalNotificacion } from '../services/notificador.js';
+import { parsearSolicitudFactura, resolverCliente } from '../services/solicitudes.js';
+import type { RepoSolicitudes } from '../store/solicitudes-supabase.js';
+import { periodoDe } from '../domain/fechas.js';
+import type { CobroRecurrente } from '../domain/tipos.js';
+import type { GrupoFacturable } from '../domain/agrupacion.js';
 import type { AlmacenPdf } from '../services/almacen-pdf.js';
 import { filaExcelDesdePayload } from '../store/facturas-repository.js';
 import type { IAuditStore } from '../store/audit-store.js';
@@ -310,6 +315,87 @@ export async function ejecutarNotify(
     notificadas.push(facturaId);
   }
   return notificadas;
+}
+
+export interface ResultadoSolicitudes {
+  procesadas: string[];
+  rechazadas: number[];
+}
+
+/**
+ * Facturas puntuales por Telegram: convierte cada solicitud NUEVA en una
+ * factura PUNTUAL:<empresa>:<cliente>:<fecha>:<solicitud> en
+ * PENDIENTE_APROBACION — la clave incluye fecha e id para no chocar jamás con
+ * el ciclo mensual RECURRENT del mismo cliente/período. La aprobación y la
+ * emisión siguen el mismo camino de siempre; aquí no se emite nada.
+ */
+export async function ejecutarProcesarSolicitudes(
+  deps: Dependencias,
+  solicitudes: RepoSolicitudes,
+  canal: CanalNotificacion,
+): Promise<ResultadoSolicitudes> {
+  const resultado: ResultadoSolicitudes = { procesadas: [], rechazadas: [] };
+  const pendientes = await solicitudes.pendientes();
+  if (pendientes.length === 0) return resultado;
+
+  const empresas = (await deps.excel.leerTabla('tblEmpresas')).map((f) => esquemaEmpresa.parse(f));
+  const clientes = (await deps.excel.leerTabla('tblClientes')).map((f) => esquemaCliente.parse(f));
+
+  for (const solicitud of pendientes) {
+    try {
+      const parseada = parsearSolicitudFactura(solicitud.texto);
+      const cliente = resolverCliente(clientes, parseada.clienteTexto);
+      const empresa = empresas.find((e) => e.activo);
+      if (!empresa) throw new Error('No hay empresa activa en tblEmpresas');
+      const clasificacion = deps.clasificaciones[empresa.empresa_id];
+      if (!clasificacion) throw new Error(`Sin clasificación SII para ${empresa.empresa_id}`);
+
+      const fecha = deps.hoy();
+      const clave = `PUNTUAL:${empresa.empresa_id}:${cliente.cliente_id}:${fecha}:${solicitud.id}`;
+      const cobro: CobroRecurrente = {
+        cobro_id: `TG-${solicitud.id}`,
+        empresa_id: empresa.empresa_id,
+        cliente_id: cliente.cliente_id,
+        descripcion_servicio: parseada.glosa,
+        moneda: parseada.moneda,
+        monto_neto: parseada.monto,
+        cantidad: 1,
+        frecuencia: 'MENSUAL',
+        dia_emision: Number(fecha.slice(8, 10)),
+        forma_pago: 'CONTADO',
+        dias_vencimiento: 0,
+        fecha_inicio: fecha,
+        fecha_fin: fecha,
+        activo: true,
+      };
+      const grupo: GrupoFacturable = {
+        clave,
+        empresaId: empresa.empresa_id,
+        clienteId: cliente.cliente_id,
+        periodo: periodoDe(fecha),
+        fechaProgramada: fecha,
+        cobros: [cobro],
+      };
+      const uf = parseada.moneda === 'UF' ? await deps.uf.obtenerValorUf(fecha) : null;
+      const payload = construirPayload(grupo, empresa, cliente, clasificacion, uf?.valor ?? null);
+      await deps.store.crearFactura(payload, hashPayload(payload));
+      const detalle = uf
+        ? `solicitud Telegram #${solicitud.id}; UF ${uf.valor} (${uf.fecha}) de ${uf.url} consultada ${uf.consultadoEn}`
+        : `solicitud Telegram #${solicitud.id}`;
+      await deps.store.registrarTransicion(clave, 'PENDIENTE_APROBACION', detalle);
+      await deps.excel.agregarFilaFacturas(filaExcelDesdePayload(payload, 'PENDIENTE_APROBACION'));
+      await solicitudes.marcarProcesada(solicitud.id, clave);
+      logger.info({ facturaId: clave, solicitud: solicitud.id }, 'solicitud Telegram convertida en factura pendiente');
+      resultado.procesadas.push(clave);
+    } catch (error) {
+      const mensaje = (error as Error).message;
+      await solicitudes.marcarRechazada(solicitud.id, mensaje);
+      await canal.enviar(`⚠️ Solicitud rechazada:\n"${solicitud.texto}"\n\n${mensaje}`);
+      logger.warn(`Solicitud Telegram #${solicitud.id} rechazada: ${mensaje}`);
+      resultado.rechazadas.push(solicitud.id);
+    }
+  }
+  return resultado;
 }
 
 export interface ResultadoEmitAprobadas {

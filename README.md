@@ -40,6 +40,7 @@ páginas reales.
 | `pnpm agent cancel --invoice <factura_id> --motivo "<texto>"` | Cancela una factura preparada que no se emitirá por el agente (p. ej. emitida a mano en el portal); solo antes de emitir |
 | `pnpm agent notify` | Nube: envía las solicitudes de aprobación remota (WhatsApp/correo) |
 | `pnpm agent emit-approved` | Nube: emite solo las facturas con aprobación remota vigente |
+| `pnpm agent procesar-solicitudes` | Nube: convierte los `/factura` de Telegram en facturas pendientes de aprobación |
 | `pnpm agent test-email` | Correo `[PRUEBA]` desde el alias al buzón principal (verificación del alias) |
 
 Todos se ejecutan desde la carpeta del proyecto. Documentación:
