@@ -26,6 +26,8 @@ jobs:
       SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}
       APPROVAL_SECRET: ${{ secrets.APPROVAL_SECRET }}
       APPROVAL_URL: ${{ secrets.APPROVAL_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
       WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
       WHATSAPP_TO: ${{ secrets.WHATSAPP_TO }}

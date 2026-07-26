@@ -1,6 +1,6 @@
 // tests/services/notificador.test.ts
 import { describe, expect, it, vi } from 'vitest';
-import { crearNotificador, NotificadorCorreo, NotificadorWhatsApp } from '../../src/services/notificador.js';
+import { crearNotificador, NotificadorCorreo, NotificadorTelegram, NotificadorWhatsApp } from '../../src/services/notificador.js';
 import type { IGraphClient } from '../../src/adapters/graph/graph-client.js';
 
 describe('NotificadorWhatsApp', () => {
@@ -34,6 +34,31 @@ describe('NotificadorWhatsApp', () => {
   });
 });
 
+describe('NotificadorTelegram', () => {
+  it('envía el mensaje por la Bot API al chat configurado', async () => {
+    const fetchFalso = vi.fn(async () => new Response('{"ok":true}', { status: 200 }));
+    const canal = new NotificadorTelegram(
+      { token: '123:abc', chatId: '55667788' },
+      fetchFalso as unknown as typeof fetch,
+    );
+    await canal.enviar('hola factura');
+    const [url, init] = fetchFalso.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.telegram.org/bot123:abc/sendMessage');
+    const cuerpo = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(cuerpo).toMatchObject({ chat_id: '55667788', text: 'hola factura' });
+  });
+
+  it('el error ante fallo NO incluye la URL (contiene el token del bot)', async () => {
+    const fetchFalso = vi.fn(async () => new Response('{"ok":false}', { status: 401 }));
+    const canal = new NotificadorTelegram(
+      { token: 'token-secreto', chatId: '1' },
+      fetchFalso as unknown as typeof fetch,
+    );
+    await expect(canal.enviar('x')).rejects.toThrow(/Telegram.*401/);
+    await expect(canal.enviar('x')).rejects.not.toThrow(/token-secreto/);
+  });
+});
+
 describe('NotificadorCorreo', () => {
   it('envía el aviso por Graph al buzón principal sin adjunto', async () => {
     const solicitar = vi.fn().mockResolvedValue(undefined);
@@ -51,6 +76,23 @@ describe('NotificadorCorreo', () => {
 
 describe('crearNotificador', () => {
   const graph = { solicitar: vi.fn() } as unknown as IGraphClient;
+
+  it('prefiere Telegram sobre WhatsApp cuando ambos están configurados', () => {
+    const canal = crearNotificador(
+      {
+        TELEGRAM_BOT_TOKEN: 't', TELEGRAM_CHAT_ID: 'c',
+        WHATSAPP_TOKEN: 'w', WHATSAPP_PHONE_ID: 'p', WHATSAPP_TO: '569',
+      },
+      graph,
+      'buzon@empresa.cl',
+    );
+    expect(canal).toBeInstanceOf(NotificadorTelegram);
+  });
+
+  it('cae a correo si Telegram está incompleto y no hay WhatsApp', () => {
+    const canal = crearNotificador({ TELEGRAM_BOT_TOKEN: 't' }, graph, 'buzon@empresa.cl');
+    expect(canal).toBeInstanceOf(NotificadorCorreo);
+  });
 
   it('elige WhatsApp cuando las tres variables están presentes', () => {
     const canal = crearNotificador(

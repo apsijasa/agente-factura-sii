@@ -223,6 +223,29 @@ programa
   });
 
 programa
+  .command('test-notify')
+  .description('Validación controlada: envía un mensaje [PRUEBA] por el canal de notificación configurado (Telegram/WhatsApp/correo); no toca facturas ni el SII')
+  .action(async () => {
+    const config = await cargarConfig(RAIZ);
+    const appOnly = Boolean(process.env.GRAPH_CLIENT_SECRET);
+    const graph = new GraphClient(
+      appOnly
+        ? crearAutenticadorClientCredentials({
+            tenantId: config.tenantId,
+            clientId: config.clientId,
+            clientSecret: process.env.GRAPH_CLIENT_SECRET as string,
+          })
+        : crearAutenticadorDeviceCode({ ...config, cachePlugin: cachePluginMsal(join(RAIZ, config.rutaDatos)) }),
+    );
+    const canal = crearNotificador(process.env, graph, config.buzonPrincipal);
+    await canal.enviar(
+      '[PRUEBA] Canal de notificaciones del agente de facturación SII operativo. ' +
+        'Por aquí llegarán los resúmenes de facturas con su enlace de aprobación.',
+    );
+    console.log(`Mensaje [PRUEBA] enviado por ${canal.constructor.name}.`);
+  });
+
+programa
   .command('cancel')
   .description('Cancela una factura preparada que NO se emitirá por el agente (p. ej. emitida a mano en el portal); exige motivo')
   .requiredOption('--invoice <factura_id>')

@@ -1,0 +1,31 @@
+# Prueba manual del canal de notificaciones (Telegram/WhatsApp/correo).
+# Se lanza solo a mano desde la pestaña Actions; envía un único mensaje [PRUEBA].
+name: Probar canal de notificaciones
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
+      GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+      WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
+      WHATSAPP_TO: ${{ secrets.WHATSAPP_TO }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Enviar mensaje de prueba
+        run: pnpm agent test-notify

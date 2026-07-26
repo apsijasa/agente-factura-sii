@@ -79,7 +79,26 @@ La app actual usa "device code" (interactivo). Para la nube se necesita
    [ApplicationAccessPolicy](https://learn.microsoft.com/en-us/graph/auth-limit-mailbox-access)
    de Exchange Online.
 
-### 3. WhatsApp (opcional — sin esto los avisos llegan por correo)
+### 3. Canal de notificación (opcional — sin nada de esto, los avisos llegan por correo)
+
+El orden de preferencia es **Telegram → WhatsApp → correo**, según qué secretos
+existan.
+
+**Telegram (recomendado para partir — 5 minutos, gratis, sin aprobaciones):**
+
+1. En Telegram, habla con **@BotFather** → `/newbot` → dale un nombre y un
+   usuario (ej. `atlas_facturas_bot`). BotFather te entrega el **token**
+   (formato `123456:ABC-...`).
+2. Escríbele cualquier mensaje a tu bot recién creado (ej. "hola") — esto es
+   obligatorio: un bot no puede iniciar conversación contigo.
+3. Abre en el navegador
+   `https://api.telegram.org/bot<TU_TOKEN>/getUpdates` y busca
+   `"chat":{"id":XXXXXXXXX` — ese número es tu **chat id**.
+4. GitHub Secrets: `TELEGRAM_BOT_TOKEN` (paso 1) y `TELEGRAM_CHAT_ID` (paso 3).
+5. Probar: Actions → **"Probar canal de notificaciones"** → Run workflow →
+   te debe llegar un mensaje `[PRUEBA]` del bot.
+
+**WhatsApp (Cloud API oficial de Meta):**
 
 1. [developers.facebook.com](https://developers.facebook.com) → crear app de
    tipo Business → producto **WhatsApp**.
@@ -88,6 +107,9 @@ La app actual usa "device code" (interactivo). Para la nube se necesita
    registrar tu número personal como destinatario de prueba.
 3. GitHub Secrets: `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `WHATSAPP_TO`
    (tu número con código de país, ej. `569XXXXXXXX`).
+4. Nota: los mensajes de texto libre solo llegan dentro de las 24 h siguientes
+   a tu último mensaje al número del bot; para avisos mensuales se necesita
+   una plantilla de utilidad aprobada (ajuste pendiente si se adopta este canal).
 
 ### 4. GitHub Secrets (lista completa)
 
@@ -103,7 +125,8 @@ En el repo → Settings → Secrets and variables → Actions:
 | `SII_CLAVE_FIRMA` | La clave de firma del DTE (la misma del llavero) |
 | `APPROVAL_SECRET` | El secreto del paso 1 |
 | `APPROVAL_URL` | `https://ivhvatrfqkrrmnkdjctn.supabase.co/functions/v1/aprobar` |
-| `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_ID` / `WHATSAPP_TO` | Paso 3 (opcionales) |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Paso 3, opción Telegram (opcionales) |
+| `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_ID` / `WHATSAPP_TO` | Paso 3, opción WhatsApp (opcionales) |
 
 Mientras falten los secretos, los workflows terminan sin hacer nada (sin
 errores ruidosos).
