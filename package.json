@@ -15,7 +15,6 @@
   "dependencies": {
     "@azure/msal-node": "^2.16.0",
     "@supabase/supabase-js": "^2.110.8",
-    "better-sqlite3": "^11.3.0",
     "cheerio": "^1.0.0",
     "commander": "^12.1.0",
     "decimal.js": "^10.4.3",
@@ -40,5 +39,8 @@
       "better-sqlite3",
       "esbuild"
     ]
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.3.0"
   }
 }
