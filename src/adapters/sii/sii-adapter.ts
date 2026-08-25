@@ -2,7 +2,22 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import { compararTotales, extraerFolio, type TotalesSii } from './parse.js';
 import { SELECTORES } from './selectores.js';
+import { VigilanteFolio } from './vigilante-folio.js';
 import type { InvoicePayload } from '../../domain/tipos.js';
+
+/**
+ * Una ventana emergente recién abierta suele estar en blanco: hay que esperar
+ * su primera carga antes de buscar el folio en ella.
+ */
+async function mirarVentanaNueva(p: Page, vigilante: VigilanteFolio): Promise<void> {
+  if (vigilante.observar({ url: p.url() })) return;
+  await p.waitForLoadState('domcontentloaded').catch(() => undefined);
+  const [texto, html] = await Promise.all([
+    p.innerText('body').catch(() => ''),
+    p.content().catch(() => ''),
+  ]);
+  vigilante.observar({ url: p.url(), texto, html });
+}
 
 export interface ResultadoPreview {
   totales: TotalesSii;
@@ -43,7 +58,7 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
   private ultimoDialogo: string | null = null;
   // Folio visto pasar en cualquier navegación (el portal puede cerrar la
   // ventana solo, inmediatamente después de confirmar).
-  private ultimoFolioVisto: string | null = null;
+  private readonly vigilante = new VigilanteFolio();
 
   constructor(
     private readonly opciones: {
@@ -84,22 +99,50 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       this.ultimoDialogo = dialogo.message();
       void dialogo.accept().catch(() => undefined);
     });
-    // Vigilancia pasiva de folio en TODAS las páginas y navegaciones del
-    // contexto: si una URL trae FOLIO=NNN, se registra aunque el portal
-    // cierre la ventana un instante después.
+    // Vigilancia por evento del folio en TODAS las páginas del contexto: la
+    // confirmación puede vivir menos que un sondeo periódico, así que se mira
+    // en cada navegación y en cada ventana nueva, no cada N segundos.
     const vigilar = (p: Page) => {
-      p.on('framenavigated', (marco) => {
-        const m = /FOLIO\s*=\s*(\d+)/i.exec(marco.url());
-        if (m) this.ultimoFolioVisto = m[1] as string;
-      });
+      const mirar = async () => {
+        if (this.vigilante.capturado) return;
+        if (this.vigilante.observar({ url: p.url() })) return;
+        const [texto, html] = await Promise.all([
+          p.innerText('body').catch(() => ''),
+          p.content().catch(() => ''),
+        ]);
+        this.vigilante.observar({ texto, html });
+      };
+      p.on('framenavigated', () => void mirar());
+      p.on('domcontentloaded', () => void mirar());
+      p.on('load', () => void mirar());
     };
     vigilar(this.pagina);
-    contexto.on('page', vigilar);
+    contexto.on('page', (p) => {
+      vigilar(p);
+      void mirarVentanaNueva(p, this.vigilante);
+    });
     return this.pagina;
+  }
+
+  /**
+   * Cierra las ventanas que dejó la factura anterior. En un lote todas las
+   * facturas comparten el navegador, y el portal va dejando emergentes atrás:
+   * el 2026-08-25 se acumularon seis en blanco. Sin esta limpieza la búsqueda
+   * del folio recorre ventanas muertas de emisiones ya cerradas.
+   */
+  private async cerrarVentanasDeLaFacturaAnterior(): Promise<void> {
+    const principal = this.pagina;
+    if (!principal) return;
+    for (const abierta of principal.context().pages()) {
+      if (abierta !== principal && !abierta.isClosed()) {
+        await abierta.close().catch(() => undefined);
+      }
+    }
   }
 
   async abrirYPreparar(payload: InvoicePayload): Promise<void> {
     const pagina = await this.paginaActiva();
+    await this.cerrarVentanasDeLaFacturaAnterior();
     await pagina.goto(SELECTORES.urlEmisionFactura);
     // El SII redirige primero al login (zeus*.sii.cl/AUT2000). La página de login
     // también tiene un campo "RUT", así que el agente NO debe tocar nada hasta que
@@ -330,7 +373,10 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
 
   async emitirUnaVez(): Promise<ResultadoEmision> {
     const pagina = await this.paginaActiva();
-    this.ultimoFolioVisto = null;
+    // Armar ANTES del clic: la confirmación puede llegar de inmediato. Al
+    // armar se descarta cualquier folio anterior, así que el de la factura
+    // previa nunca puede adjudicarse a ésta.
+    this.vigilante.armar();
     // ÚNICA acción de emisión. Sin reintentos automáticos (diseño §10).
     await pagina.locator(SELECTORES.botonEmitir).click();
 
@@ -359,9 +405,9 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       const limite = Date.now() + this.opciones.timeoutMs;
       let encontrado: string | null = null;
       while (Date.now() < limite && !encontrado) {
-        // El folio pudo pasar en una navegación fugaz (vigilancia pasiva).
-        if (this.ultimoFolioVisto) {
-          encontrado = this.ultimoFolioVisto;
+        // El folio pudo pasar en una navegación fugaz (vigilancia por evento).
+        if (this.vigilante.capturado) {
+          encontrado = this.vigilante.capturado;
           break;
         }
         const abiertas = contexto.pages().filter((p) => !p.isClosed());
@@ -383,7 +429,10 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
             break;
           }
         }
-        if (!encontrado) await new Promise((resolver) => setTimeout(resolver, 2000));
+        // Sondeo de respaldo corto: la vigilancia por evento es quien debería
+        // atrapar el folio; esto solo cubre confirmaciones que no disparan
+        // ningún evento de navegación.
+        if (!encontrado) await new Promise((resolver) => setTimeout(resolver, 250));
       }
       if (!encontrado) {
         for (const [i, abierta] of contexto.pages().entries()) {
@@ -397,6 +446,10 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
       const mensaje = (error as Error).message;
       if (mensaje.startsWith('RESPUESTA_INCIERTA:')) throw error;
       throw new Error(`RESPUESTA_INCIERTA: fallo tras el clic de emisión: ${mensaje}`);
+    } finally {
+      // Cerrada la ventana de captura de ESTA factura: nada de lo que ocurra
+      // después puede adjudicarle un folio.
+      this.vigilante.desarmar();
     }
 
     // Con folio confirmado, un fallo en la descarga del PDF NO es incierto:
