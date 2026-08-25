@@ -1,6 +1,6 @@
 // src/adapters/sii/sii-adapter.ts
 import { chromium, type Browser, type Page } from 'playwright';
-import { compararTotales, type TotalesSii } from './parse.js';
+import { compararTotales, extraerFolio, type TotalesSii } from './parse.js';
 import { SELECTORES } from './selectores.js';
 import type { InvoicePayload } from '../../domain/tipos.js';
 
@@ -372,17 +372,13 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
           );
         }
         for (const abierta of abiertas) {
-          // 1) Folio como texto visible ("Folio N° 36").
+          // Cubre los tres rótulos vistos en confirmaciones reales: "Folio N° 36",
+          // "FACTURA ELECTRÓNICA N° 42" y el parámetro &FOLIO=36 de la URL del DTE.
           const texto = await abierta.innerText('body').catch(() => '');
-          let m = SELECTORES.folioEnConfirmacion.exec(texto);
-          // 2) Folio en enlaces/HTML (ej. mipeShowDte.cgi?...&FOLIO=36) — cubre
-          //    confirmaciones que muestran el DTE como PDF embebido.
-          if (!m) {
-            const html = await abierta.content().catch(() => '');
-            m = /FOLIO\s*=\s*(\d+)/i.exec(html);
-          }
-          if (m) {
-            encontrado = m[1] as string;
+          const html = await abierta.content().catch(() => '');
+          const folioVisto = extraerFolio(texto, html);
+          if (folioVisto) {
+            encontrado = folioVisto;
             paginaConfirmacion = abierta;
             break;
           }
