@@ -389,6 +389,11 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     try {
       await pagina.waitForLoadState('networkidle').catch(() => undefined);
       await this.guardarEvidencia(pagina, 'post-firmar');
+      // Desde aquí, cualquier alerta del portal pertenece a la firma de ESTE
+      // documento. La página de firma avisa por alert() cuando la firma digital
+      // falla, y sin esto el diagnóstico se pierde: el lote del 2026-08-25
+      // solo dejó "no se encontró folio", que describe el síntoma y no la causa.
+      this.ultimoDialogo = null;
       // Firma automática si la página de firma es la conocida y la clave está
       // en el llavero; ante cualquier diferencia, firma el operador.
       const firmado = await this.intentarFirmaAutomatica(pagina);
@@ -438,7 +443,12 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
         for (const [i, abierta] of contexto.pages().entries()) {
           if (!abierta.isClosed()) await this.guardarEvidencia(abierta, `emision-incierta-p${i}`);
         }
-        throw new Error('RESPUESTA_INCIERTA: no se encontró folio en la confirmación');
+        const alerta = this.ultimoDialogo
+          ? ` | El portal avisó: ${this.ultimoDialogo}`
+          : ' | El portal no mostró ninguna alerta';
+        throw new Error(
+          `RESPUESTA_INCIERTA: no se encontró folio en la confirmación${alerta} | Última URL: ${pagina.url()}`,
+        );
       }
       folio = encontrado;
       await this.guardarEvidencia(paginaConfirmacion, 'confirmacion-folio');
