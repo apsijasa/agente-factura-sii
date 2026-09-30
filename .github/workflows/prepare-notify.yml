@@ -8,6 +8,13 @@ on:
   schedule:
     - cron: '0 11 * * *' # 07:00 Chile (invierno) todos los días
   workflow_dispatch:
+    inputs:
+      fecha:
+        description: >-
+          Ponerse al día con un lote atrasado: fecha programada AAAA-MM-DD
+          (ej. 2026-09-25). Vacío = hoy, que es lo que hace el cron diario.
+        required: false
+        type: string
 
 concurrency:
   group: facturacion-sii
@@ -53,9 +60,28 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         if: env.CONFIGURADO == 'si'
+      # `prepare` solo crea facturas cuando la fecha pedida calza EXACTO con la
+      # programada, así que un lote que no se preparó el día que tocaba no se
+      # recupera solo: el cron de mañana lo deja en `atrasados`. La fecha
+      # explícita es la única forma de ponerse al día.
+      #
+      # La fecha viaja por entorno y no interpolada en el `run`: este job tiene
+      # las claves del SII, y un input incrustado en la shell es inyección de
+      # comandos. Se valida el formato antes de pasarla al agente.
       - name: Preparar facturas del día
         if: env.CONFIGURADO == 'si'
-        run: pnpm agent prepare --mode simulation
+        env:
+          FECHA: ${{ inputs.fecha }}
+        run: |
+          if [ -z "$FECHA" ]; then
+            pnpm agent prepare --mode simulation
+          elif printf '%s' "$FECHA" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "Poniéndose al día con el lote programado para $FECHA"
+            pnpm agent prepare --mode simulation --date "$FECHA"
+          else
+            echo "::error::fecha inválida: se espera AAAA-MM-DD"
+            exit 1
+          fi
       - name: Enviar solicitudes de aprobación
         if: env.CONFIGURADO == 'si'
         run: pnpm agent notify
