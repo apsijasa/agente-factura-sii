@@ -26,8 +26,8 @@ jobs:
     timeout-minutes: 15
     env:
       AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CF_API_URL: ${{ secrets.CF_API_URL }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
       SII_CLAVE: ${{ secrets.SII_CLAVE }}
       SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}
@@ -41,8 +41,8 @@ jobs:
     steps:
       - name: Verificar configuración
         run: |
-          if [ -z "$AGENTE_CONFIG_JSON" ] || [ -z "$SUPABASE_URL" ]; then
-            echo "::notice::Secretos aún no configurados (ver docs/nube.md); nada que hacer."
+          if [ -z "$AGENTE_CONFIG_JSON" ] || [ -z "$CF_API_URL" ]; then
+            echo "::notice::Secretos aún no configurados (ver docs/cloudflare.md); nada que hacer."
             echo "CONFIGURADO=no" >> "$GITHUB_ENV"
           else
             echo "CONFIGURADO=si" >> "$GITHUB_ENV"

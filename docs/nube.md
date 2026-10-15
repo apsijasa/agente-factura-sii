@@ -1,5 +1,9 @@
 # Modo nube — el agente sin tu computador
 
+> **Desde el 15-10-2026 los datos viven en Cloudflare (D1 + R2 + Worker), no en
+> Supabase.** El flujo descrito aquí sigue igual; lo que cambió (secretos,
+> URLs y puesta en marcha) está en [cloudflare.md](cloudflare.md).
+
 El agente puede correr completo en la nube: GitHub Actions ejecuta los ciclos,
 la auditoría vive en Supabase (Postgres), los PDFs en un bucket privado de
 Supabase Storage, y tú apruebas cada factura desde el teléfono. Tu Mac puede

@@ -1,9 +1,11 @@
 // src/services/almacen-pdf.ts
 import { readFile } from 'node:fs/promises';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ApiCloudflare } from '../store/api-cloudflare.js';
 import { guardarPdf, rutaFactura, sanitizarNombreCarpeta } from './storage.js';
 
 export const PREFIJO_SUPABASE = 'supabase://facturas/';
+export const PREFIJO_R2 = 'r2://facturas/';
 const BUCKET = 'facturas';
 
 /**
@@ -76,5 +78,35 @@ export class AlmacenPdfSupabase implements AlmacenPdf {
     const { data, error } = await this.sb.storage.from(BUCKET).download(clave);
     if (error || !data) throw new Error(`Supabase Storage download ${clave}: ${error?.message ?? 'sin datos'}`);
     return Buffer.from(await data.arrayBuffer());
+  }
+}
+
+/**
+ * PDFs en Cloudflare R2 (vía el Worker). Los PDFs históricos se copiaron con
+ * la MISMA clave que tenían en Supabase Storage, así que obtener() acepta
+ * también las rutas antiguas `supabase://facturas/...` ya auditadas en pdf_path.
+ */
+export class AlmacenPdfR2 implements AlmacenPdf {
+  constructor(private readonly api: ApiCloudflare) {}
+
+  rutaPrevista(carpeta: string, fechaEmision: string): string {
+    return `${PREFIJO_R2}${claveRelativa(carpeta, fechaEmision, 'PENDIENTE')}`;
+  }
+
+  async guardarFactura(carpeta: string, fechaEmision: string, folio: string, datos: Buffer): Promise<string> {
+    validarPdf(datos);
+    const clave = claveRelativa(carpeta, fechaEmision, folio);
+    // El Worker rechaza (409) si la clave ya existe: un folio confirmado jamás se sobrescribe.
+    await this.api.subirPdf(clave, datos);
+    return `${PREFIJO_R2}${clave}`;
+  }
+
+  async obtener(ruta: string): Promise<Buffer> {
+    const clave = ruta.startsWith(PREFIJO_R2)
+      ? ruta.slice(PREFIJO_R2.length)
+      : ruta.startsWith(PREFIJO_SUPABASE)
+        ? ruta.slice(PREFIJO_SUPABASE.length)
+        : ruta;
+    return this.api.descargarPdf(clave);
   }
 }

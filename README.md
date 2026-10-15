@@ -48,7 +48,8 @@ Todos se ejecutan desde la carpeta del proyecto. Documentación:
 - **[docs/manual-de-usuario.md](docs/manual-de-usuario.md)** — guía completa paso a paso (configurar + usar), para el operador
 - [docs/setup.md](docs/setup.md) — configuración inicial (referencia técnica)
 - [docs/operacion.md](docs/operacion.md) — ciclo mensual, referencia del Excel y solución de problemas
-- **[docs/nube.md](docs/nube.md)** — modo nube: GitHub Actions + Supabase + aprobación desde el teléfono, sin tu computador
+- **[docs/nube.md](docs/nube.md)** — modo nube: GitHub Actions + aprobación desde el teléfono, sin tu computador
+- **[docs/cloudflare.md](docs/cloudflare.md)** — datos de la nube en Cloudflare (D1 + R2 + Worker): puesta en marcha y corte desde Supabase
 
 ## Seguridad
 

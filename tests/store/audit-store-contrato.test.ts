@@ -1,6 +1,6 @@
 // tests/store/audit-store-contrato.test.ts
 // Suite de CONTRATO: el mismo comportamiento observable, ejecutado contra las
-// dos implementaciones de IAuditStore (SQLite local y Supabase). Si una regla
+// tres implementaciones de IAuditStore (SQLite local, Supabase y Cloudflare D1). Si una regla
 // cambia en una implementación y no en la otra, esta suite lo delata.
 // Hallazgo graphify 2026-07-26: ambos stores son gemelos estructurales sin un
 // contrato común que impida que diverjan en silencio.
@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { AuditStore, type IAuditStore } from '../../src/store/audit-store.js';
 import { AuditStoreSupabase } from '../../src/store/audit-store-supabase.js';
 import { crearSupabaseFalso } from './supabase-falso.js';
+import { AuditStoreCloudflare } from '../../src/store/audit-store-cloudflare.js';
+import { crearCloudflareFalso } from './cloudflare-falso.js';
 import type { InvoicePayload } from '../../src/domain/tipos.js';
 
 const payload = {
@@ -52,6 +54,7 @@ const payload = {
 const implementaciones: [string, () => IAuditStore][] = [
   ['AuditStore (SQLite)', () => new AuditStore(':memory:')],
   ['AuditStoreSupabase', () => new AuditStoreSupabase(crearSupabaseFalso().sb)],
+  ['AuditStoreCloudflare (Worker + D1)', () => new AuditStoreCloudflare(crearCloudflareFalso().api)],
 ];
 
 describe.each(implementaciones)('Contrato IAuditStore — %s', (_nombre, crearStore) => {

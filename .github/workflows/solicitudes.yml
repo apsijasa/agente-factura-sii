@@ -23,17 +23,16 @@ jobs:
       - name: ¿Hay solicitudes nuevas?
         id: chequeo
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CF_API_URL: ${{ secrets.CF_API_URL }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          if [ -z "$SUPABASE_URL" ]; then
+          if [ -z "$CF_API_URL" ]; then
             echo "::notice::Secretos aún no configurados; nada que hacer."
             echo "hay_trabajo=no" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          nuevas=$(curl -sf "$SUPABASE_URL/rest/v1/solicitudes_facturas?estado=eq.NUEVA&select=id" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          nuevas=$(curl -sf "$CF_API_URL/api/gate/solicitudes-nuevas" \
+            -H "Authorization: Bearer $CF_API_TOKEN")
           echo "Solicitudes nuevas: $nuevas"
           if [ "$nuevas" = "[]" ]; then
             echo "hay_trabajo=no" >> "$GITHUB_OUTPUT"
@@ -48,8 +47,8 @@ jobs:
     timeout-minutes: 15
     env:
       AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CF_API_URL: ${{ secrets.CF_API_URL }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
       SII_CLAVE: ${{ secrets.SII_CLAVE }}
       SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}

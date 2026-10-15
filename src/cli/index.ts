@@ -13,7 +13,6 @@ import { MailService } from '../services/correo.js';
 import { AprobacionRemota } from '../services/aprobacion.js';
 import { crearNotificador } from '../services/notificador.js';
 import { cachePluginMsal, conEntorno, RAIZ } from './entorno.js';
-import { SolicitudesSupabase } from '../store/solicitudes-supabase.js';
 import {
   ejecutarCancel, ejecutarEmit, ejecutarEmitAprobadas, ejecutarNotify, ejecutarPrepare,
   ejecutarPreviewSii, ejecutarProcesarSolicitudes, ejecutarRetryEmail,
@@ -87,9 +86,9 @@ programa
       throw new Error('procesar-solicitudes exige APPROVAL_SECRET y APPROVAL_URL en el entorno');
     }
     await conEntorno(true, async (deps, _repo, entorno) => {
-      if (!entorno.supabase) throw new Error('procesar-solicitudes requiere modo nube (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY)');
+      if (!entorno.solicitudes) throw new Error('procesar-solicitudes requiere modo nube (CF_API_URL y CF_API_TOKEN)');
       const canal = crearNotificador(process.env, entorno.graph, entorno.config.buzonPrincipal);
-      const resultado = await ejecutarProcesarSolicitudes(deps, new SolicitudesSupabase(entorno.supabase), canal);
+      const resultado = await ejecutarProcesarSolicitudes(deps, entorno.solicitudes, canal);
       const notificadas = await ejecutarNotify(deps, canal, {
         urlAprobacion,
         secreto,

@@ -1,0 +1,30 @@
+# Migración ÚNICA (manual): copia los PDFs del bucket privado de Supabase a
+# Cloudflare R2 con la misma clave y verifica SHA-256 de cada uno.
+# Usa los secretos de Supabase que ya existen + los nuevos de Cloudflare.
+# Idempotente: se puede volver a ejecutar sin riesgo.
+name: Migrar PDFs a R2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      CF_API_URL: ${{ secrets.CF_API_URL }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Copiar y verificar PDFs
+        run: pnpm exec tsx scripts/migrar-pdfs-a-r2.ts

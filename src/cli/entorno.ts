@@ -20,10 +20,14 @@ import { ExcelAdapter } from '../adapters/excel/excel-adapter.js';
 import { UfProvider } from '../adapters/uf/uf-provider.js';
 import { SiiAdapterPlaywright } from '../adapters/sii/sii-adapter.js';
 import { MailService } from '../services/correo.js';
-import { AlmacenPdfLocal, AlmacenPdfSupabase } from '../services/almacen-pdf.js';
+import { AlmacenPdfLocal, AlmacenPdfR2, AlmacenPdfSupabase, type AlmacenPdf } from '../services/almacen-pdf.js';
 import { ApprovalService } from '../services/aprobacion.js';
 import type { IAuditStore } from '../store/audit-store.js';
 import { AuditStoreSupabase } from '../store/audit-store-supabase.js';
+import { ApiCloudflare } from '../store/api-cloudflare.js';
+import { AuditStoreCloudflare } from '../store/audit-store-cloudflare.js';
+import { SolicitudesCloudflare } from '../store/solicitudes-cloudflare.js';
+import { SolicitudesSupabase, type RepoSolicitudes } from '../store/solicitudes-supabase.js';
 import { FacturasRepository } from '../store/facturas-repository.js';
 import { conBloqueo } from './lock.js';
 import type { Dependencias } from './comandos.js';
@@ -31,10 +35,13 @@ import { logger } from '../services/logger.js';
 
 export const RAIZ = process.cwd();
 
-// Modo nube: la auditoría vive en Supabase y los PDFs en su bucket privado.
-// Se activa solo con las credenciales del service role presentes en el entorno.
-export const esNube = (): boolean =>
-  Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Modo nube Cloudflare (preferente): auditoría en D1 y PDFs en R2, ambos vía
+// la API privada del Worker. Se activa con CF_API_URL + CF_API_TOKEN.
+export const esNubeCloudflare = (): boolean => Boolean(process.env.CF_API_URL && process.env.CF_API_TOKEN);
+// Modo nube Supabase (anterior, se mantiene como respaldo): solo si no hay Cloudflare.
+export const esNubeSupabase = (): boolean =>
+  !esNubeCloudflare() && Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+export const esNube = (): boolean => esNubeCloudflare() || esNubeSupabase();
 
 // Cache de tokens Microsoft cifrado (la llave vive en el llavero): evita
 // repetir el código de dispositivo en cada comando.
@@ -54,6 +61,8 @@ export interface Entorno {
   rl: Readline;
   appOnly: boolean;
   supabase: SupabaseClient | null;
+  /** Repositorio de solicitudes /factura de Telegram; null en modo local. */
+  solicitudes: RepoSolicitudes | null;
 }
 
 export async function armarDependencias(): Promise<Entorno> {
@@ -71,15 +80,30 @@ export async function armarDependencias(): Promise<Entorno> {
       : crearAutenticadorDeviceCode({ ...config, cachePlugin: cachePluginMsal(rutaDatos) }),
   );
   const excel = new ExcelAdapter(graph, config);
-  const supabase = esNube()
+  const cloudflare = esNubeCloudflare()
+    ? new ApiCloudflare(process.env.CF_API_URL as string, process.env.CF_API_TOKEN as string)
+    : null;
+  const supabase = esNubeSupabase()
     ? createClient(process.env.SUPABASE_URL as string, process.env.SUPABASE_SERVICE_ROLE_KEY as string)
     : null;
   // Hallazgo graphify 2026-07-26: better-sqlite3 es un módulo NATIVO que la nube
   // no usa; el import dinámico evita cargarlo (y depender de que compile en el
-  // runner) cuando el store es Supabase.
-  const store: IAuditStore = supabase
-    ? new AuditStoreSupabase(supabase)
-    : new (await import('../store/audit-store.js')).AuditStore(join(rutaDatos, 'agente.sqlite'));
+  // runner) cuando el store está en la nube.
+  const store: IAuditStore = cloudflare
+    ? new AuditStoreCloudflare(cloudflare)
+    : supabase
+      ? new AuditStoreSupabase(supabase)
+      : new (await import('../store/audit-store.js')).AuditStore(join(rutaDatos, 'agente.sqlite'));
+  const pdfs: AlmacenPdf = cloudflare
+    ? new AlmacenPdfR2(cloudflare)
+    : supabase
+      ? new AlmacenPdfSupabase(supabase)
+      : new AlmacenPdfLocal(config.rutaRaizClientes);
+  const solicitudes: RepoSolicitudes | null = cloudflare
+    ? new SolicitudesCloudflare(cloudflare)
+    : supabase
+      ? new SolicitudesSupabase(supabase)
+      : null;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const io = {
     pregunta: (mensaje: string) =>
@@ -106,11 +130,11 @@ export async function armarDependencias(): Promise<Entorno> {
     correo: new MailService(graph, config.buzonPrincipal),
     aprobacion: new ApprovalService(io, () => new Date(), userInfo().username),
     clasificaciones: config.emisores,
-    pdfs: supabase ? new AlmacenPdfSupabase(supabase) : new AlmacenPdfLocal(config.rutaRaizClientes),
+    pdfs,
     hoy: () => new Date().toISOString().slice(0, 10),
   };
   const primerEmisor = Object.keys(config.emisores)[0] as string;
-  return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, config, rutaDatos, rl, appOnly, supabase };
+  return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, config, rutaDatos, rl, appOnly, supabase, solicitudes };
 }
 
 export async function conEntorno(

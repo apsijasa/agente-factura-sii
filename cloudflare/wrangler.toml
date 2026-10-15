@@ -1,0 +1,23 @@
+# Worker del agente de facturación (reemplaza a Supabase en modo nube).
+# Desplegar desde esta carpeta:  npx wrangler deploy
+name = "agente-factura-sii"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "agente-factura-sii"
+database_id = "1a1e5163-448c-43e6-93d9-7a2015b56cc3"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "PDFS"
+bucket_name = "agente-factura-sii-facturas"
+
+# Secretos (NO van aquí). Cargarlos una vez con:
+#   npx wrangler secret put AGENT_API_TOKEN
+#   npx wrangler secret put APPROVAL_SECRET
+#   npx wrangler secret put TELEGRAM_BOT_TOKEN
+#   npx wrangler secret put TELEGRAM_CHAT_ID
+#   npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
