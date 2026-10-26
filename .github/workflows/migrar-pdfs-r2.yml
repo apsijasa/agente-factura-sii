@@ -7,6 +7,12 @@ name: Migrar PDFs a R2
 on:
   workflow_dispatch:
 
+# Mismo grupo que los otros workflows: escribe en R2 y no debe cruzarse con
+# una emisión que esté subiendo PDFs.
+concurrency:
+  group: facturacion-sii
+  cancel-in-progress: false
+
 jobs:
   migrar:
     runs-on: ubuntu-latest
