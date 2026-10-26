@@ -1,0 +1,102 @@
+# Cancela una factura ya preparada que NO se va a emitir (p. ej. el cliente se
+# desactivó en el Excel después de prepararla y el agente sigue reenviando su
+# enlace de aprobación cada día). Disparo exclusivamente manual: no hay cron.
+#
+# Existe como workflow porque `cancel` necesita CF_API_URL + CF_API_TOKEN para
+# escribir en D1, y ese token es un GitHub Secret de solo escritura que no se
+# puede recuperar para una terminal. Sin él, el agente caería a modo local y
+# cancelaría en un SQLite que no es la fuente de verdad.
+#
+# No instala Chromium: este comando jamás toca el SII. Solo escribe la
+# transición CANCELADA en la auditoría y la refleja en tblFacturas vía Graph.
+name: Cancelar factura preparada
+
+on:
+  workflow_dispatch:
+    inputs:
+      invoice:
+        description: >-
+          factura_id completo. Formatos: RECURRENT:<empresa>:<cliente>:<AAAA-MM>
+          o PUNTUAL:<empresa>:<cliente>:<AAAA-MM-DD>:<id>
+        required: true
+        type: string
+      motivo:
+        description: Motivo de la cancelación (queda en la auditoría y en tblFacturas)
+        required: true
+        type: string
+
+concurrency:
+  group: facturacion-sii
+  cancel-in-progress: false
+
+jobs:
+  cancelar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
+      CF_API_URL: ${{ secrets.CF_API_URL }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      # Graph: `ejecutarCancel` refleja el resultado en tblFacturas, no solo en D1.
+      GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+      # El preflight de `conEntorno` comprueba que exista la credencial del
+      # emisor (en la nube la lee de SII_CLAVE). Sin ella aborta antes de
+      # llegar a `cancel`, aunque este comando nunca abra el portal.
+      SII_CLAVE: ${{ secrets.SII_CLAVE }}
+    steps:
+      # Las entradas viajan por entorno y no interpoladas en el `run`: este job
+      # tiene credenciales de Cloudflare y del SII, y un input incrustado en la
+      # shell es inyección de comandos. Se validan antes de tocar nada.
+      - name: Validar entradas
+        env:
+          INVOICE: ${{ inputs.invoice }}
+          MOTIVO: ${{ inputs.motivo }}
+        run: |
+          case "$INVOICE$MOTIVO" in
+            *$'\n'*)
+              echo "::error::las entradas no admiten saltos de línea"
+              exit 1
+              ;;
+          esac
+          recurrente='^RECURRENT:[^:]+:[^:]+:[0-9]{4}-[0-9]{2}$'
+          puntual='^PUNTUAL:[^:]+:[^:]+:[0-9]{4}-[0-9]{2}-[0-9]{2}:[0-9]+$'
+          if ! [[ "$INVOICE" =~ $recurrente || "$INVOICE" =~ $puntual ]]; then
+            echo "::error::invoice inválido: se espera RECURRENT:<empresa>:<cliente>:<AAAA-MM> o PUNTUAL:<empresa>:<cliente>:<AAAA-MM-DD>:<id>"
+            exit 1
+          fi
+          if [ -z "$(printf '%s' "$MOTIVO" | tr -d '[:space:]')" ]; then
+            echo "::error::motivo vacío: la cancelación exige un motivo"
+            exit 1
+          fi
+          echo "Entradas válidas para $INVOICE"
+      - name: Verificar configuración
+        run: |
+          if [ -z "$AGENTE_CONFIG_JSON" ] || [ -z "$CF_API_URL" ] || [ -z "$CF_API_TOKEN" ]; then
+            echo "::notice::Secretos aún no configurados (ver docs/cloudflare.md); no se canceló nada."
+            echo "CONFIGURADO=no" >> "$GITHUB_ENV"
+          else
+            echo "CONFIGURADO=si" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/checkout@v4
+        if: env.CONFIGURADO == 'si'
+      - uses: pnpm/action-setup@v4
+        if: env.CONFIGURADO == 'si'
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        if: env.CONFIGURADO == 'si'
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: env.CONFIGURADO == 'si'
+      # `ejecutarCancel` trae sus propias guardas: exige motivo y solo cancela
+      # desde los estados anteriores a la emisión (BORRADOR,
+      # PENDIENTE_APROBACION, APROBADA). Una factura ya emitida falla aquí; eso
+      # se resuelve con nota de crédito en el portal, no con este workflow.
+      - name: Cancelar factura
+        if: env.CONFIGURADO == 'si'
+        env:
+          INVOICE: ${{ inputs.invoice }}
+          MOTIVO: ${{ inputs.motivo }}
+        run: pnpm agent cancel --invoice "$INVOICE" --motivo "$MOTIVO"
