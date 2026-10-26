@@ -67,6 +67,21 @@ describe('Worker /aprobar', () => {
     expect(await store.obtenerAprobacion(payload.factura_id)).toBeUndefined();
   });
 
+  // El cliente_id lo escribe una persona en el Excel y nada le exige ASCII.
+  // El firmante en Node codifica el cuerpo del token en UTF-8; si el Worker lo
+  // decodifica con atob() a secas obtiene latin1 ("ASESORÃ\u008dA"), la firma
+  // valida igual y el SELECT no encuentra la fila: 404 y enlace roto para siempre.
+  it('aprueba una factura cuyo factura_id lleva tilde (el cuerpo del token se lee como UTF-8)', async () => {
+    const cf = crearCloudflareFalso();
+    const store = new AuditStoreCloudflare(cf.api);
+    const acentuada = { ...payload, factura_id: 'RECURRENT:ACME:ASESORÍA LTDA:2026-10' } as InvoicePayload;
+    await store.crearFactura(acentuada, 'hash-1');
+    await store.registrarTransicion(acentuada.factura_id, 'PENDIENTE_APROBACION', 'preparación');
+    const res = await cf.llamarWorker(enlace({ facturaId: acentuada.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() }));
+    expect(res.status).toBe(200);
+    expect(await store.obtenerAprobacion(acentuada.factura_id)).toMatchObject({ actor: 'aprobacion-remota', payload_hash: 'hash-1' });
+  });
+
   it('no tiene efecto si la factura ya no espera aprobación', async () => {
     const cf = crearCloudflareFalso();
     const store = new AuditStoreCloudflare(cf.api);

@@ -94,7 +94,12 @@ export async function verificarToken(token: string, secreto: string, ahora = Dat
   if (!igualesTiempoConstante(esperada, firma)) throw new Error('Token inválido (firma)');
   let datos: DatosToken;
   try {
-    datos = JSON.parse(atob(cuerpo.replaceAll('-', '+').replaceAll('_', '/'))) as DatosToken;
+    // atob() entrega latin1 y el firmante (Node, Buffer.toString()) escribió
+    // UTF-8: con un factura_id acentuado ambos divergen aunque la firma valide,
+    // y el SELECT no encuentra la fila. Se decodifica a bytes y recién ahí a texto.
+    const bin = atob(cuerpo.replaceAll('-', '+').replaceAll('_', '/'));
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    datos = JSON.parse(new TextDecoder().decode(bytes)) as DatosToken;
   } catch {
     throw new Error('Token inválido (contenido)');
   }

@@ -92,6 +92,38 @@ limpia: `pnpm install --frozen-lockfile && pnpm test` sin pasos manuales.
 
 ---
 
+## 🟠 2b. El Worker no tiene despliegue automatizado
+
+Salió a la luz al arreglar la tarea 2: el código del Worker vive en el repo,
+pero **un `git push` no lo despliega**. Hay que correr `wrangler deploy` a mano
+desde `cloudflare/`, y no existe ningún workflow que lo haga.
+
+Eso significa que el repo y lo que corre en producción **pueden divergir en
+silencio**, sin que nada lo avise. Es la misma clase de problema que tenía el
+esquema de Supabase antes de la migración, y la razón por la que un arreglo
+puede quedar "listo" en `main` sin estar vivo.
+
+**Qué hacer:** un workflow que despliegue el Worker (`wrangler deploy` con un
+`CLOUDFLARE_API_TOKEN` en secretos), con disparo manual como mínimo. Si se hace
+automático al tocar `cloudflare/**`, hay que pensar bien la guarda: desplegar
+el Worker a mitad de un ciclo de emisión no es inocuo.
+
+---
+
+## ✅ 2. El token de aprobación se rompía con acentos — ARREGLADA (26-10-2026)
+
+Arreglado en `cloudflare/src/index.ts`: el cuerpo del token se convierte a
+bytes y se decodifica con `TextDecoder` (UTF-8), que es lo que escribió el
+firmante en Node. La prueba nueva en `tests/cloudflare/worker.test.ts` usa un
+`factura_id` con tilde y **falla sin el arreglo** (404, "Factura no
+encontrada"), así que no puede volver a romperse en silencio.
+
+**Pendiente:** el arreglo no llega a producción hasta correr `wrangler deploy`
+desde `cloudflare/` (ver tarea 2b).
+
+<details>
+<summary>Descripción original</summary>
+
 ## 🔴 2. El token de aprobación se decodifica mal: se rompe con acentos
 
 **Archivo:** `cloudflare/src/index.ts:97`
@@ -130,6 +162,8 @@ datos = JSON.parse(new TextDecoder().decode(bytes)) as DatosToken;
 **Verificar:** agregar a `tests/cloudflare/worker.test.ts` un caso con
 `factura_id` acentuado. El arnés ya corre el Worker real en Node, así que
 reproduce el bug tal cual; solo falta que algún fixture deje de ser ASCII.
+
+</details>
 
 ---
 
