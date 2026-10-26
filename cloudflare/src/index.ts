@@ -109,9 +109,11 @@ export async function verificarToken(token: string, secreto: string, ahora = Dat
     throw new Error('Token inválido (contenido)');
   }
   if (!datos.facturaId || !datos.payloadHash || !datos.expiraEn) throw new Error('Token inválido (campos)');
-  if (ahora > new Date(datos.expiraEn).getTime()) {
-    throw new Error('El enlace expiró; espere la próxima notificación del agente');
-  }
+  // Un expiraEn no parseable da NaN y `ahora > NaN` es false: el enlace no
+  // vencería nunca. Va firmado, pero el vencimiento no debe depender del firmante.
+  const vence = new Date(datos.expiraEn).getTime();
+  if (Number.isNaN(vence)) throw new Error('Token inválido (vencimiento)');
+  if (ahora > vence) throw new Error('El enlace expiró; espere la próxima notificación del agente');
   return datos;
 }
 

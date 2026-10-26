@@ -44,7 +44,10 @@ export function verificarToken(token: string, secreto: string, ahora: Date): Dat
   if (!datos.facturaId || !datos.payloadHash || !datos.expiraEn) {
     throw new Error('Token de aprobación inválido (campos)');
   }
-  if (ahora.getTime() > new Date(datos.expiraEn).getTime()) {
+  // NaN no vence nunca (`ahora > NaN` es false); un vencimiento ilegible es token inválido.
+  const vence = new Date(datos.expiraEn).getTime();
+  if (Number.isNaN(vence)) throw new Error('Token de aprobación inválido (vencimiento)');
+  if (ahora.getTime() > vence) {
     throw new Error('El enlace de aprobación expiró; espere la próxima notificación');
   }
   return datos;

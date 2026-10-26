@@ -82,6 +82,14 @@ describe('Worker /aprobar', () => {
     expect(await store.obtenerAprobacion(acentuada.factura_id)).toMatchObject({ actor: 'aprobacion-remota', payload_hash: 'hash-1' });
   });
 
+  it('un vencimiento ilegible es enlace inválido, no un enlace eterno', async () => {
+    const { llamarWorker, store } = await facturaPendiente();
+    const res = await llamarWorker(enlace({ facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: 'mañana' }));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('vencimiento');
+    expect(await store.obtenerAprobacion(payload.factura_id)).toBeUndefined();
+  });
+
   it('no tiene efecto si la factura ya no espera aprobación', async () => {
     const cf = crearCloudflareFalso();
     const store = new AuditStoreCloudflare(cf.api);

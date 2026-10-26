@@ -107,7 +107,6 @@ Hacer **5 antes que 6**.
 
 | | Qué | Dónde |
 |---|---|---|
-| M3 | Un `expiraEn` no parseable da `NaN`, y `ahora > NaN` es `false`: el enlace nunca vence. Va firmado, así que no es explotable, pero el invariante queda dependiendo del firmante | `cloudflare/src/index.ts:102` y `src/services/token-aprobacion.ts:47` |
 | M4 | `crearFactura` del Worker no valida la entrada: sin `lineas` revienta con 500 en vez de 400 | `cloudflare/src/index.ts:244-248` |
 | B1 | El error crudo de D1 se responde al chat de Telegram | `cloudflare/src/index.ts:217` |
 | B3 | `/aprobar` es un GET con efecto de escritura. Mitigado en Telegram y WhatsApp, queda expuesto el canal de correo: un escáner que haga prefetch registraría la aprobación. Preexistente. Cierre: GET muestra botón, POST confirma | `cloudflare/src/index.ts` |
@@ -183,6 +182,7 @@ si la clave existe, que se traduce en el 409 `YA_EXISTE` de siempre. La
 interfaz `R2Bucket` y el R2 falso de las pruebas entienden `onlyIf`. La prueba
 nueva anula `head` (simula la ventana de carrera) y exige que la segunda subida
 igual sea rechazada y el PDF original quede intacto.
+
 ---
 
 ## ✅ 5. Media credencial desviaba la escritura sin avisar — ARREGLADA (26-10-2026)
@@ -195,6 +195,7 @@ Cloudflare es un error, no un modo. Los gates de `emit-approved` y
 `solicitudes` y la verificación de `prepare-notify` y `cancelar` distinguen
 "sin configurar" (aviso y nada que hacer) de "media credencial" (`::error::`).
 Pruebas en `tests/cli/entorno.test.ts`.
+
 ---
 
 ## ✅ 7. Arreglos menores de la revisión — ítems resueltos
@@ -202,6 +203,8 @@ Pruebas en `tests/cli/entorno.test.ts`.
 | | Qué quedó |
 |---|---|
 | M2 | `ApiCloudflare` tiene timeout (`AbortSignal.timeout`, 30 s) y reintento acotado (3 intentos) reutilizando `conReintentos` de Graph: red, timeout y 5xx se reintentan; cualquier 4xx (el 409 del CAS, `YA_EXISTE`, `FACTURA_DUPLICADA`) es respuesta y no se repite. `ErrorApiCloudflare` hereda de `HttpError` para eso. Pruebas en `tests/store/api-cloudflare.test.ts` |
+| M3 | Un `expiraEn` no parseable (NaN) ya no es "nunca vence": tanto el Worker como el firmante en Node lo rechazan como token inválido (vencimiento). Pruebas en `tests/services/token-aprobacion.test.ts` y `tests/cloudflare/worker.test.ts` |
+
 ---
 
 ## ✅ 8. Octubre — CERRADO (26-10-2026)

@@ -21,6 +21,11 @@ describe('token de aprobación', () => {
     expect(() => verificarToken(token, SECRETO, new Date('2026-07-27T00:00:00Z'))).toThrow(/expir/i);
   });
 
+  it('rechaza un vencimiento ilegible en vez de tratarlo como "nunca vence"', () => {
+    const token = crearToken({ ...datos, expiraEn: 'mañana' }, SECRETO);
+    expect(() => verificarToken(token, SECRETO, new Date('2026-07-25T12:00:00Z'))).toThrow(/vencimiento/);
+  });
+
   it('rechaza un token alterado (cambio de factura)', () => {
     const token = crearToken(datos, SECRETO);
     const [cuerpo, firma] = token.split('.');
