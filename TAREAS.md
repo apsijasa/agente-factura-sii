@@ -49,38 +49,6 @@ el Worker a mitad de un ciclo de emisión no es inocuo.
 
 ---
 
-## 🟠 3. El PDF se sube con una comprobación que no es atómica
-
-**Archivo:** `cloudflare/src/index.ts:339-340`
-
-```ts
-if (await env.PDFS.head(clave)) return json({ error: 'YA_EXISTE' }, 409);
-await env.PDFS.put(clave, datos, { ... });
-```
-
-El comentario promete "equivalente a `upsert:false`" y `docs/cloudflare.md`
-afirma "PUT nunca sobrescribe". Con Supabase eso se evaluaba atómicamente en el
-servidor; acá hay una ventana entre el `head` y el `put`. La documentación de
-R2 es explícita: si dos clientes escriben la misma clave, gana el último.
-
-Es el único invariante que la migración dice preservar y que hoy solo preserva
-aproximadamente. El riesgo real es bajo porque los workflows comparten
-`concurrency: facturacion-sii`, pero el almacén no debería depender de eso.
-
-**Arreglo** (R2 lo soporta nativo):
-```ts
-const puesto = await env.PDFS.put(clave, datos, {
-  onlyIf: { etagDoesNotMatch: '*' },
-  httpMetadata: { contentType: 'application/pdf' },
-});
-if (puesto === null) return json({ error: 'YA_EXISTE' }, 409);
-```
-
-Hay que agregar `onlyIf` a la interfaz `R2Bucket` (`index.ts:34`) y al R2 falso
-(`tests/store/cloudflare-falso.ts:54`).
-
----
-
 ## 🟠 4. Emitir varias facturas en una corrida falla una de cada dos
 
 **Archivo:** `src/cli/comandos.ts:413` (`ejecutarEmitAprobadas`)
@@ -230,6 +198,16 @@ encontrada"), así que no puede volver a romperse en silencio.
 desde `cloudflare/` (ver tarea 2b).
 
 
+---
+
+## ✅ 3. El PDF se subía con una comprobación no atómica — ARREGLADA (26-10-2026)
+
+`cloudflare/src/index.ts`: el `PUT /api/pdf` ya no hace `head` y después `put`;
+pasa `onlyIf: { etagDoesNotMatch: '*' }` en el mismo `put` y R2 devuelve `null`
+si la clave existe, que se traduce en el 409 `YA_EXISTE` de siempre. La
+interfaz `R2Bucket` y el R2 falso de las pruebas entienden `onlyIf`. La prueba
+nueva anula `head` (simula la ventana de carrera) y exige que la segunda subida
+igual sea rechazada y el PDF original quede intacto.
 ---
 
 ## ✅ 8. Octubre — CERRADO (26-10-2026)

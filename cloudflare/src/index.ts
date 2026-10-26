@@ -28,10 +28,15 @@ export interface D1Database {
 export interface R2ObjectBody {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
+export interface R2PutOptions {
+  /** Precondición evaluada por R2 en el servidor; con `etagDoesNotMatch: '*'` el put falla (devuelve null) si la clave ya existe. */
+  onlyIf?: { etagDoesNotMatch?: string };
+  httpMetadata?: { contentType?: string };
+}
 export interface R2Bucket {
   head(clave: string): Promise<unknown | null>;
   get(clave: string): Promise<R2ObjectBody | null>;
-  put(clave: string, datos: ArrayBuffer, opciones?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  put(clave: string, datos: ArrayBuffer, opciones?: R2PutOptions): Promise<unknown | null>;
 }
 
 export interface Env {
@@ -341,8 +346,13 @@ async function api(req: Request, env: Env, ruta: string): Promise<Response> {
         const cabecera = new TextDecoder('latin1').decode(new Uint8Array(datos).subarray(0, 5));
         if (!cabecera.startsWith('%PDF')) return json({ error: 'El contenido no es un PDF' }, 400);
         // Equivalente a upsert:false — un folio confirmado jamás se sobrescribe.
-        if (await env.PDFS.head(clave)) return json({ error: 'YA_EXISTE' }, 409);
-        await env.PDFS.put(clave, datos, { httpMetadata: { contentType: 'application/pdf' } });
+        // La precondición la evalúa R2 en el mismo put: un `head` previo dejaba
+        // una ventana en la que dos escritores podían pasar y "ganaba el último".
+        const puesto = await env.PDFS.put(clave, datos, {
+          onlyIf: { etagDoesNotMatch: '*' },
+          httpMetadata: { contentType: 'application/pdf' },
+        });
+        if (puesto === null) return json({ error: 'YA_EXISTE' }, 409);
         return json({ ok: true, key: clave });
       }
       if (req.method === 'GET') {

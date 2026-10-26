@@ -157,6 +157,21 @@ describe('AlmacenPdfR2', () => {
     await expect(almacen.guardarFactura('NCA', '2026-07-24', '35', PDF)).rejects.toBeInstanceOf(ErrorApiCloudflare);
   });
 
+  // Antes el Worker hacía `head` y luego `put`: entre ambos, otro escritor
+  // podía colarse y "ganaba el último" (documentación de R2). Ahora la
+  // precondición viaja en el mismo put (`onlyIf: etagDoesNotMatch: '*'`), así
+  // que un `head` que mienta no puede abrir la ventana.
+  it('el no-sobrescribir lo decide R2 en el put, no una comprobación previa', async () => {
+    const cf = crearCloudflareFalso();
+    const head = vi.spyOn(cf.env.PDFS, 'head').mockResolvedValue(null);
+    const almacen = new AlmacenPdfR2(cf.api);
+    await almacen.guardarFactura('NCA', '2026-07-24', '35', PDF);
+    const otro = Buffer.from('%PDF-1.4\n%otro\n%%EOF\n');
+    await expect(almacen.guardarFactura('NCA', '2026-07-24', '35', otro)).rejects.toMatchObject({ estado: 409, codigo: 'YA_EXISTE' });
+    expect(cf.objetos.get('NCA/2026/07/Factura_35_NCA_2026-07.pdf')?.equals(PDF)).toBe(true);
+    expect(head).not.toHaveBeenCalled();
+  });
+
   it('relee rutas nuevas y las históricas supabase:// migradas con la misma clave', async () => {
     const { api, objetos } = crearCloudflareFalso();
     objetos.set('SOCIEDAD MMP/2026/09/Factura_68_SOCIEDAD MMP_2026-09.pdf', PDF);

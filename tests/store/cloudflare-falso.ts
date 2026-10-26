@@ -51,7 +51,9 @@ export function crearR2Falso(): { r2: R2Bucket; objetos: Map<string, Buffer> } {
       if (!b) return null;
       return { arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer };
     },
-    put: async (k, datos) => {
+    put: async (k, datos, opciones) => {
+      // Misma semántica que R2: la precondición se decide en el put, no antes.
+      if (opciones?.onlyIf?.etagDoesNotMatch === '*' && objetos.has(k)) return null;
       objetos.set(k, Buffer.from(datos));
       return {};
     },
