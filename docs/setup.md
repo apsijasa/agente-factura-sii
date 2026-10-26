@@ -61,9 +61,10 @@ pnpm agent prepare --mode simulation --date 2026-07-05
 
 **Nota sobre `better-sqlite3` en Node ≥ 24:** el binario prebuilt de
 `better-sqlite3` puede no estar disponible para versiones recientes de Node
-(no hay binario publicado para ese runtime todavía). `package.json` ya
-declara `better-sqlite3` en `pnpm.onlyBuiltDependencies`, así que `pnpm
-install` intenta compilarlo localmente durante el postinstall. Si la
+(no hay binario publicado para ese runtime todavía). `pnpm-workspace.yaml`
+ya autoriza el script de build de `better-sqlite3` con `allowBuilds` (pnpm 11+
+eliminó `onlyBuiltDependencies`), así que `pnpm install` intenta compilarlo
+localmente durante el postinstall. Si la
 importación de `better-sqlite3` falla (por ejemplo con `Cannot find module
 '.../better_sqlite3.node'` o un error de compilación), ejecutar:
 

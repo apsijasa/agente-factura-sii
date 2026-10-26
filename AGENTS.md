@@ -48,22 +48,18 @@ Los cuatro en verde. Son 289 pruebas y corren en ~2 segundos; no hay excusa
 para saltarlas. **Las pruebas automáticas jamás tocan el SII real ni envían
 correos.**
 
-### Puesta en marcha (hay una trampa)
+### Puesta en marcha
 
 ```bash
 pnpm install
 ```
 
-Si falla con `ERR_PNPM_IGNORED_BUILDS`, es un problema conocido del repo
-(ver `TAREAS.md`): `package.json` configura `pnpm.onlyBuiltDependencies`, que
-pnpm 12 ya no lee. Mientras no se arregle:
-
-```bash
-pnpm approve-builds better-sqlite3 esbuild --yes
-```
-
-Sin eso, `better-sqlite3` no compila y fallan 79 pruebas por una causa que no
-tiene nada que ver con el código.
+Sin pasos manuales. `package.json` fija `packageManager: pnpm@12.14.0` (corepack
+y `pnpm/action-setup` lo leen, así local y CI usan la misma versión) y
+`pnpm-workspace.yaml` autoriza los scripts de build de `better-sqlite3` y
+`esbuild` con `allowBuilds`. Ojo: pnpm 11+ eliminó `onlyBuiltDependencies` y
+dejó de leer el campo `pnpm` de `package.json`; si vuelve a aparecer
+`ERR_PNPM_IGNORED_BUILDS`, lo que se movió es esa lista, no el archivo.
 
 ## Mapa del proyecto
 

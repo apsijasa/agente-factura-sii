@@ -75,33 +75,20 @@ eso es una nota de crédito en el portal, no una transición de estado.
 
 ---
 
-## 🔴 1. `pnpm install` no funciona en una clonación nueva
+## ✅ 1. `pnpm install` en una clonación nueva — RESUELTA (26-10-2026)
 
-**Síntoma:** `ERR_PNPM_IGNORED_BUILDS`. Si se ignora, `better-sqlite3` no
-compila y **fallan 79 de 289 pruebas** por una causa que nada tiene que ver
-con el código.
+La causa era que pnpm 11 **renombró** `onlyBuiltDependencies` a `allowBuilds` y
+dejó de leer el campo `pnpm` de `package.json`. El archivo correcto siempre fue
+`pnpm-workspace.yaml`; lo que había cambiado era la clave.
 
-**Causa:** `package.json` declara `pnpm.onlyBuiltDependencies`, y pnpm 12 ya no
-lee ese campo. Lo dice pnpm mismo al instalar:
+Quedó: `pnpm-workspace.yaml` con `allowBuilds`, `packageManager: pnpm@12.14.0`
+en `package.json` como única fuente de verdad de la versión, y los seis
+workflows sin `version: 10` para que CI tome esa misma. Verificado en una copia
+limpia: `pnpm install --frozen-lockfile && pnpm test` sin pasos manuales.
 
-> *The "pnpm" field in package.json is no longer read by pnpm. The following
-> keys were ignored: "pnpm.onlyBuiltDependencies".*
-
-No se nota en CI porque los workflows fijan `pnpm/action-setup@v4` en la
-**versión 10**, donde el campo sí se lee.
-
-**Qué hacer:** mover la configuración a donde pnpm 12 la lee (ver
-https://pnpm.io/settings). Ojo: `pnpm-workspace.yaml` con
-`onlyBuiltDependencies` **no** basta — lo probé y sigue fallando. Hay que
-averiguar la ubicación correcta para esta versión.
-
-Conviene además fijar la versión de pnpm en `engines` y alinear CI con lo que
-se usa local, para que esta divergencia no vuelva a esconderse.
-
-**Verificar:** en un clon limpio, `pnpm install && pnpm test` sin pasos
-manuales. Deben dar **289 pruebas en verde**.
-
-**Mientras tanto:** `pnpm approve-builds better-sqlite3 esbuild --yes`
+**Ojo con CI:** desde este cambio los workflows corren con **pnpm 12 en vez de
+10**. Se validó con el workflow "Probar canal de notificaciones", que ejercita
+`pnpm install --frozen-lockfile` sin tocar facturas ni el SII.
 
 ---
 

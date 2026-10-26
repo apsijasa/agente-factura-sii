@@ -51,8 +51,6 @@ jobs:
         if: env.CONFIGURADO == 'si'
       - uses: pnpm/action-setup@v4
         if: env.CONFIGURADO == 'si'
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         if: env.CONFIGURADO == 'si'
         with:

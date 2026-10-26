@@ -1,0 +1,7 @@
+# Dependencias con scripts de build autorizados. pnpm 11+ eliminó
+# `onlyBuiltDependencies` (y dejó de leer el campo `pnpm` de package.json);
+# el reemplazo es `allowBuilds` en este archivo. Sin esto, better-sqlite3 no
+# compila y fallan 79 pruebas por una causa ajena al código.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
