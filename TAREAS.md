@@ -13,6 +13,22 @@ historial de git lo guarda igual.
 
 Para trabajar una: *"Lee AGENTS.md y TAREAS.md. Implementa la tarea 3."*
 
+## Cuáles NO se hacen sin supervisión
+
+Estas exigen una decisión humana o credenciales que un agente no tiene. Si te
+topas con una trabajando en otra cosa, **detente y avisa** en vez de resolverla:
+
+| | Por qué |
+|---|---|
+| **2b** | Necesita un `CLOUDFLARE_API_TOKEN` que hay que crear a mano, y hay que decidir la guarda: desplegar el Worker a mitad de un ciclo de emisión no es inocuo |
+| **4** | Sin causa raíz. El arreglo propuesto es un rodeo y **solo se valida con un lote real**; no hay forma de comprobarlo en frío |
+| **6** | Borra secretos y pausa un proyecto. Irreversible, y depende de que la 5 esté verificada en producción |
+| **9** | No es código: es entrar al portal del SII y enviarle un documento a un cliente |
+| **N2** | Es `.data/config.json`, archivo local de la máquina del operador y fuera de git |
+
+El resto (3, 5, y M2–M4, B1, B4, B5, N1, N3 de la tarea 7) sí se puede tomar de
+corrido, siempre con los cuatro chequeos en verde antes de cada commit.
+
 ---
 
 ## 🟠 2b. El Worker no tiene despliegue automatizado
