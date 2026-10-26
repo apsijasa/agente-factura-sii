@@ -108,7 +108,6 @@ Hacer **5 antes que 6**.
 | | Qué | Dónde |
 |---|---|---|
 | B3 | `/aprobar` es un GET con efecto de escritura. Mitigado en Telegram y WhatsApp, queda expuesto el canal de correo: un escáner que haga prefetch registraría la aprobación. Preexistente. Cierre: GET muestra botón, POST confirma | `cloudflare/src/index.ts` |
-| B5 | Falta `Cache-Control: no-store` en el HTML de `/aprobar` | `cloudflare/src/index.ts:108-118` |
 | N1 | **Reintento acotado ante corte de red antes de firmar.** El 26-10 el portal del SII cortó la conexión dos veces al navegar a `mipeSelEmpresa.cgi` (`net::ERR_CONNECTION_RESET`), en CLI-022 y CLI-027. Ambas se resolvieron reintentando a mano. Ocurre en `abrirYPreparar`, **antes de llenar el formulario y mucho antes de firmar**, así que no deja documento y reintentar es seguro — no roza el invariante de "una sola emisión", que protege el tramo *posterior* al clic de firma. Un reintento acotado (2 o 3 intentos con espera) ahorraría repetir el ciclo completo | `src/adapters/sii/sii-adapter.ts` (`abrirYPreparar`) |
 | N2 | `.data/config.json` apunta a `Documents/Codex/agente factura sii/cliente`, la ruta anterior del repo. En modo nube no molesta (la comprobación se salta), pero **cualquier comando local falla en el preflight** | `.data/config.json` → `rutaRaizClientes` |
 | N3 | **El preflight exige la clave del SII a comandos que nunca abren el portal.** `preflight` llama a `leerSecreto(rutEmisor)` sin condición, así que `cancel`, `notify`, `retry-email` y `procesar-solicitudes` necesitan `SII_CLAVE` solo para pasar el chequeo. Obliga a repartir la credencial más importante del sistema a workflows que no la usan. Debería verificarse solo cuando el comando vaya a tocar el SII, con una opción como la que ya existe para `verificarRutaClientes` | `src/config/preflight.ts:44-47` |
@@ -204,6 +203,7 @@ Pruebas en `tests/cli/entorno.test.ts`.
 | M4 | El Worker valida la entrada de `crear-factura` (`payload` texto JSON con `factura_id` y `lineas` no vacías, `hash`) y responde 400 con el motivo en vez de 500; lo mismo para un cuerpo que no es JSON en las rutas `/api/*` y para una clave de PDF inválida. Prueba en `tests/cloudflare/worker.test.ts` |
 | B1 | El mensaje crudo de D1 ya no se responde al chat de Telegram: el chat recibe un aviso genérico y el detalle queda en el log del Worker (`console.error`). Prueba en `tests/cloudflare/worker.test.ts` |
 | B4 | `migrar-pdfs-r2.yml` lleva `concurrency: facturacion-sii` como los otros cinco workflows |
+| B5 | Todo el HTML de `/aprobar` sale con `Cache-Control: no-store` (verificado en la prueba de aprobación) |
 
 ---
 

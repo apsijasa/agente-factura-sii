@@ -136,7 +136,9 @@ function html(titulo: string, cuerpo: string, estado = 200): Response {
 <style>body{font-family:-apple-system,system-ui,sans-serif;max-width:520px;margin:15vh auto;padding:0 24px;color:#1a1a1a}
 h1{font-size:1.4rem}p{line-height:1.5;color:#444}.ok{color:#0a7d40}.err{color:#b00020}</style>
 </head><body>${cuerpo}</body></html>`,
-    { status: estado, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    // no-store: la respuesta de /aprobar es el resultado de una acción, no una
+    // página; ningún proxy ni navegador debe servirla de nuevo desde cache.
+    { status: estado, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } },
   );
 }
 

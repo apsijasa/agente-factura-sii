@@ -39,6 +39,7 @@ describe('Worker /aprobar', () => {
     const { llamarWorker, store, api } = await facturaPendiente();
     const res = await llamarWorker(enlace({ facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() }));
     expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
     expect(await res.text()).toContain('Factura aprobada');
     expect(await store.obtenerAprobacion(payload.factura_id)).toMatchObject({ actor: 'aprobacion-remota', payload_hash: 'hash-1' });
     const gate = await (await llamarWorker('https://agente.test/api/gate/aprobadas-pendientes', {
