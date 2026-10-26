@@ -47,6 +47,12 @@ npx wrangler deploy
 Anota la URL que imprime, del tipo
 `https://agente-factura-sii.<tu-subdominio>.workers.dev`.
 
+Las siguientes veces **no hace falta la terminal**: Actions → **"Desplegar
+Worker"** → *Run workflow*. Es solo manual (un `git push` no despliega) y
+comparte el grupo `facturacion-sii`, así que espera a que termine cualquier
+emisión en curso antes de tocar el Worker. Necesita el secreto
+`CLOUDFLARE_API_TOKEN` del paso 4. Ojo: no aplica migraciones de D1.
+
 ### 3. Secretos del Worker
 
 ```bash
@@ -67,6 +73,8 @@ Repo → Settings → Secrets and variables → Actions:
 | `CF_API_URL` | La URL del paso 2 (sin `/` final) |
 | `CF_API_TOKEN` | El `AGENT_API_TOKEN` del paso 3 |
 | `APPROVAL_URL` | **Cambiar** a `<CF_API_URL>/aprobar` |
+| `CLOUDFLARE_API_TOKEN` | Token de API de Cloudflare (dash → My Profile → API Tokens → plantilla *Edit Cloudflare Workers*, acotado a esta cuenta). Solo lo usa el workflow "Desplegar Worker" |
+| `CLOUDFLARE_ACCOUNT_ID` | Opcional: solo si el token ve más de una cuenta (wrangler no puede elegir sola en modo no interactivo) |
 
 Los secretos `SUPABASE_*` se mantienen solo hasta terminar el paso 5.
 

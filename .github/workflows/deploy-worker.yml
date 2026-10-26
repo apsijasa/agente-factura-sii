@@ -1,0 +1,55 @@
+# Despliega el Worker (cloudflare/) con `wrangler deploy`. Disparo SOLO manual:
+# un push a main no despliega, y es a propósito. Desplegar a mitad de un ciclo
+# de emisión no es inocuo, así que (1) nadie lo dispara sin querer y (2) comparte
+# el grupo de concurrencia facturacion-sii: si hay una emisión corriendo, este
+# job espera a que termine antes de tocar el Worker.
+#
+# Necesita el secreto CLOUDFLARE_API_TOKEN (token de API de Cloudflare con
+# permiso de edición sobre Workers; lo crea el operador, ver docs/cloudflare.md).
+# Si ese token ve más de una cuenta, además CLOUDFLARE_ACCOUNT_ID.
+#
+# No aplica migraciones de D1 (`wrangler d1 migrations apply`): cambiar el
+# esquema de la auditoría sigue siendo un paso aparte y deliberado.
+name: Desplegar Worker
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: facturacion-sii
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Verificar configuración
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::Falta el secreto CLOUDFLARE_API_TOKEN (ver docs/cloudflare.md); no se desplegó nada."
+            echo "CONFIGURADO=no" >> "$GITHUB_ENV"
+          else
+            echo "CONFIGURADO=si" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/checkout@v4
+        if: env.CONFIGURADO == 'si'
+      - uses: actions/setup-node@v4
+        if: env.CONFIGURADO == 'si'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+      # wrangler vive en cloudflare/package-lock.json (npm, no pnpm): la misma
+      # versión que se usa a mano con `npx wrangler deploy`.
+      - name: Instalar wrangler
+        if: env.CONFIGURADO == 'si'
+        working-directory: cloudflare
+        run: npm ci
+      - name: Desplegar el Worker
+        if: env.CONFIGURADO == 'si'
+        working-directory: cloudflare
+        run: npx wrangler deploy

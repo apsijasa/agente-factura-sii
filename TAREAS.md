@@ -20,32 +20,13 @@ topas con una trabajando en otra cosa, **detente y avisa** en vez de resolverla:
 
 | | Por qué |
 |---|---|
-| **2b** | Necesita un `CLOUDFLARE_API_TOKEN` que hay que crear a mano, y hay que decidir la guarda: desplegar el Worker a mitad de un ciclo de emisión no es inocuo |
 | **4** | Sin causa raíz. El arreglo propuesto es un rodeo y **solo se valida con un lote real**; no hay forma de comprobarlo en frío |
 | **6** | Borra secretos y pausa un proyecto. Irreversible, y depende de que la 5 esté verificada en producción |
 | **9** | No es código: es entrar al portal del SII y enviarle un documento a un cliente |
 | **N2** | Es `.data/config.json`, archivo local de la máquina del operador y fuera de git |
 
-El resto (3, 5, y M2–M4, B1, B4, B5, N1, N3 de la tarea 7) sí se puede tomar de
-corrido, siempre con los cuatro chequeos en verde antes de cada commit.
-
----
-
-## 🟠 2b. El Worker no tiene despliegue automatizado
-
-Salió a la luz al arreglar la tarea 2: el código del Worker vive en el repo,
-pero **un `git push` no lo despliega**. Hay que correr `wrangler deploy` a mano
-desde `cloudflare/`, y no existe ningún workflow que lo haga.
-
-Eso significa que el repo y lo que corre en producción **pueden divergir en
-silencio**, sin que nada lo avise. Es la misma clase de problema que tenía el
-esquema de Supabase antes de la migración, y la razón por la que un arreglo
-puede quedar "listo" en `main` sin estar vivo.
-
-**Qué hacer:** un workflow que despliegue el Worker (`wrangler deploy` con un
-`CLOUDFLARE_API_TOKEN` en secretos), con disparo manual como mínimo. Si se hace
-automático al tocar `cloudflare/**`, hay que pensar bien la guarda: desplegar
-el Worker a mitad de un ciclo de emisión no es inocuo.
+El resto sí se puede tomar de corrido, siempre con los cuatro chequeos en verde
+antes de cada commit.
 
 ---
 
@@ -165,6 +146,22 @@ encontrada"), así que no puede volver a romperse en silencio.
 **Pendiente:** el arreglo no llega a producción hasta correr `wrangler deploy`
 desde `cloudflare/` (ver tarea 2b).
 
+
+---
+
+## ✅ 2b. Despliegue del Worker desde Actions — HECHA (26-10-2026)
+
+`.github/workflows/deploy-worker.yml`: disparo **solo manual**, mismo patrón
+que `cancelar.yml` (termina sin ruido si falta `CLOUDFLARE_API_TOKEN`) y
+grupo `facturacion-sii`, que es la guarda contra desplegar a mitad de una
+emisión: espera a que termine. Instala wrangler con `npm ci` desde
+`cloudflare/package-lock.json` y corre `wrangler deploy` en `cloudflare/`.
+No aplica migraciones de D1.
+
+**Pendiente del operador:** crear el token en Cloudflare (plantilla *Edit
+Cloudflare Workers*) y guardarlo como secreto `CLOUDFLARE_API_TOKEN`; luego
+disparar el workflow para que los arreglos del Worker (2, 3, M3, M4, B1, B5,
+B3) lleguen a producción.
 
 ---
 
