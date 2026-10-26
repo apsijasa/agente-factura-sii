@@ -8,7 +8,7 @@ teléfono). Lo único que cambia es dónde viven los datos:
 |---|---|
 | Postgres (6 tablas + vista `facturas_aprobadas_pendientes`) | **D1** `agente-factura-sii` (mismo esquema en SQLite: `cloudflare/migrations/0001_esquema_auditoria.sql`) |
 | RPC `crear_factura` / `registrar_transicion` | Endpoints del Worker `/api/crear-factura` y `/api/registrar-transicion` (batch atómico con el mismo compare-and-swap) |
-| Edge Function `aprobar` | Worker `GET /aprobar` |
+| Edge Function `aprobar` | Worker `/aprobar`: el GET muestra la factura y el botón, el POST del botón confirma (abrir el enlace no aprueba) |
 | Edge Function `telegram-webhook` | Worker `POST /telegram-webhook` |
 | Storage, bucket privado `facturas` | **R2** `agente-factura-sii-facturas` (mismas claves; PUT nunca sobrescribe) |
 | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | `CF_API_URL` + `CF_API_TOKEN` |

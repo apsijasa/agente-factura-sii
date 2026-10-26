@@ -28,8 +28,11 @@ async function facturaPendiente() {
   return { ...cf, store };
 }
 
-const enlace = (datos: { facturaId: string; payloadHash: string; expiraEn: string }, secreto = 'secreto-aprobacion') =>
-  `https://agente.test/aprobar?token=${crearToken(datos, secreto)}`;
+type Datos = { facturaId: string; payloadHash: string; expiraEn: string };
+const enlace = (datos: Datos, secreto = 'secreto-aprobacion') => `https://agente.test/aprobar?token=${crearToken(datos, secreto)}`;
+// Lo que envía el botón de la página: POST con el token en el formulario.
+const confirmar = (llamarWorker: (url: string, init?: RequestInit) => Promise<Response>, datos: Datos, secreto = 'secreto-aprobacion') =>
+  llamarWorker('https://agente.test/aprobar', { method: 'POST', body: new URLSearchParams({ token: crearToken(datos, secreto) }) });
 const enUnaHora = () => new Date(Date.now() + 3_600_000).toISOString();
 
 afterEach(() => vi.unstubAllGlobals());
@@ -37,7 +40,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('Worker /aprobar', () => {
   it('registra la aprobación remota con el hash del enlace y la factura queda en el gate', async () => {
     const { llamarWorker, store, api } = await facturaPendiente();
-    const res = await llamarWorker(enlace({ facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() }));
+    const res = await confirmar(llamarWorker, { facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() });
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     expect(await res.text()).toContain('Factura aprobada');
@@ -49,10 +52,31 @@ describe('Worker /aprobar', () => {
     expect(api).toBeDefined();
   });
 
-  it('rechaza (409) si el contenido cambió después de la notificación, sin aprobar nada', async () => {
+  // El canal de correo está expuesto a escáneres que hacen prefetch de cada
+  // enlace. Un GET con efecto de escritura dejaría que uno de ellos aprobara.
+  it('abrir el enlace (GET) no aprueba: muestra el botón, y solo el POST del botón registra la aprobación', async () => {
     const { llamarWorker, store } = await facturaPendiente();
-    const res = await llamarWorker(enlace({ facturaId: payload.factura_id, payloadHash: 'hash-viejo', expiraEn: enUnaHora() }));
-    expect(res.status).toBe(409);
+    const datos = { facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() };
+    const pagina = await llamarWorker(enlace(datos));
+    expect(pagina.status).toBe(200);
+    const cuerpo = await pagina.text();
+    expect(cuerpo).toContain('method="post"');
+    expect(cuerpo).toContain('Aprobar factura');
+    expect(cuerpo).not.toContain('Factura aprobada');
+    expect(await store.obtenerAprobacion(payload.factura_id)).toBeUndefined();
+    // Segundo GET (un prefetch más): sigue sin aprobar.
+    await llamarWorker(enlace(datos));
+    expect(await store.obtenerAprobacion(payload.factura_id)).toBeUndefined();
+    const res = await confirmar(llamarWorker, datos);
+    expect(await res.text()).toContain('Factura aprobada');
+    expect(await store.obtenerAprobacion(payload.factura_id)).toMatchObject({ actor: 'aprobacion-remota' });
+  });
+
+  it('rechaza (409) si el contenido cambió después de la notificación, sin aprobar nada, en GET y en POST', async () => {
+    const { llamarWorker, store } = await facturaPendiente();
+    const datos = { facturaId: payload.factura_id, payloadHash: 'hash-viejo', expiraEn: enUnaHora() };
+    expect((await llamarWorker(enlace(datos))).status).toBe(409);
+    expect((await confirmar(llamarWorker, datos)).status).toBe(409);
     expect(await store.obtenerAprobacion(payload.factura_id)).toBeUndefined();
   });
 
@@ -61,9 +85,7 @@ describe('Worker /aprobar', () => {
     const vencido = await llamarWorker(enlace({ facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: '2020-01-01T00:00:00Z' }));
     expect(vencido.status).toBe(400);
     expect(await vencido.text()).toContain('expiró');
-    const falsificado = await llamarWorker(
-      enlace({ facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() }, 'otro-secreto'),
-    );
+    const falsificado = await confirmar(llamarWorker, { facturaId: payload.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() }, 'otro-secreto');
     expect(falsificado.status).toBe(400);
     expect(await store.obtenerAprobacion(payload.factura_id)).toBeUndefined();
   });
@@ -78,7 +100,7 @@ describe('Worker /aprobar', () => {
     const acentuada = { ...payload, factura_id: 'RECURRENT:ACME:ASESORÍA LTDA:2026-10' } as InvoicePayload;
     await store.crearFactura(acentuada, 'hash-1');
     await store.registrarTransicion(acentuada.factura_id, 'PENDIENTE_APROBACION', 'preparación');
-    const res = await cf.llamarWorker(enlace({ facturaId: acentuada.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() }));
+    const res = await confirmar(cf.llamarWorker, { facturaId: acentuada.factura_id, payloadHash: 'hash-1', expiraEn: enUnaHora() });
     expect(res.status).toBe(200);
     expect(await store.obtenerAprobacion(acentuada.factura_id)).toMatchObject({ actor: 'aprobacion-remota', payload_hash: 'hash-1' });
   });

@@ -10,8 +10,8 @@ Supabase Storage, y tú apruebas cada factura desde el teléfono. Tu Mac puede
 estar apagado.
 
 **La aprobación humana sigue siendo obligatoria.** Nada se emite sin que tú
-abras el enlace de aprobación. Lo único que cambió es dónde apruebas: antes en
-la terminal, ahora desde WhatsApp o correo.
+abras el enlace de aprobación **y toques el botón**. Lo único que cambió es
+dónde apruebas: antes en la terminal, ahora desde el teléfono.
 
 ## Arquitectura
 
@@ -36,8 +36,10 @@ Ciclo completo:
    por WhatsApp (o correo, si WhatsApp no está configurado) el resumen de cada
    una con un **enlace de aprobación firmado** (HMAC, ligado al hash exacto del
    contenido, vence en 48 h).
-2. **Tú apruebas desde el teléfono** — el enlace abre la Edge Function
-   `aprobar`, que valida el token y registra la aprobación. Si el Excel cambió
+2. **Tú apruebas desde el teléfono** — el enlace abre una página que valida el
+   token y muestra la factura con el botón **Aprobar factura**; recién al
+   tocarlo se registra la aprobación. Abrir el enlace no aprueba: así un
+   escáner de enlaces del correo no puede aprobar por ti. Si el Excel cambió
    después de la notificación, la aprobación se rechaza por seguridad.
 3. **Cada 30 minutos (08:00–19:30 Chile)** — `emit-approved`: un chequeo barato
    pregunta a Supabase si hay facturas aprobadas pendientes. Solo si las hay,
@@ -139,7 +141,7 @@ errores ruidosos).
 
 1. GitHub → Actions → "Preparar y notificar" → **Run workflow**. Si hay cobros
    para hoy, te llegará la notificación con el enlace.
-2. Abre el enlace y aprueba.
+2. Abre el enlace y toca **Aprobar factura**.
 3. Actions → "Emitir aprobadas" → **Run workflow** (o espera al próximo ciclo
    de 30 min). Revisa el resumen del run y el PDF en el bucket.
 
@@ -207,6 +209,8 @@ llavero, navegador visible, aprobación por terminal con `APROBAR <id>`).
   Function) puede leer o escribir; las llaves públicas de Supabase no ven nada.
 - **El enlace de aprobación** está firmado (HMAC-SHA256), vence en 48 h, va
   ligado a UNA factura y a UN contenido exacto; si el Excel cambia, no sirve.
+  Y abrirlo no aprueba: la aprobación es el botón (un POST), que un prefetch
+  de enlaces no envía.
 - **Atomicidad servidor**: crear factura y transicionar estado son funciones
   RPC de Postgres con compare-and-swap — mismas garantías que el SQLite local.
 - **Bucket privado con `upsert:false`**: un PDF de folio confirmado jamás se

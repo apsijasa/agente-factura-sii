@@ -1,6 +1,7 @@
 // cloudflare/src/index.ts
 // Worker único que reemplaza a Supabase en modo nube:
-//   GET  /aprobar             — enlace de aprobación remota (ex Edge Function `aprobar`)
+//   GET  /aprobar             — enlace de aprobación remota: muestra la factura y el botón (ex Edge Function `aprobar`)
+//   POST /aprobar             — confirma la aprobación (lo envía el botón; abrir el enlace no aprueba)
 //   POST /telegram-webhook    — bot de Telegram /factura (ex Edge Function `telegram-webhook`)
 //   /api/*                    — API privada del agente (Bearer AGENT_API_TOKEN):
 //       POST /api/query                 consulta parametrizada contra D1
@@ -142,18 +143,24 @@ h1{font-size:1.4rem}p{line-height:1.5;color:#444}.ok{color:#0a7d40}.err{color:#b
   );
 }
 
-async function aprobar(req: Request, env: Env): Promise<Response> {
-  if (req.method !== 'GET') return html('Método no permitido', '<h1 class="err">Método no permitido</h1>', 405);
-  const token = new URL(req.url).searchParams.get('token') ?? '';
-  if (!env.APPROVAL_SECRET) return html('Configuración', '<h1 class="err">Falta APPROVAL_SECRET en el Worker</h1>', 500);
+// El token viaja en la URL del enlace (GET) y en el cuerpo del formulario (POST).
+async function leerToken(req: Request): Promise<string> {
+  if (req.method === 'POST') {
+    const formulario = await req.formData().catch(() => null);
+    const token = formulario?.get('token');
+    if (typeof token === 'string' && token) return token;
+  }
+  return new URL(req.url).searchParams.get('token') ?? '';
+}
 
+/** Todo lo que puede estar mal con un enlace, sin escribir nada. Devuelve los datos del token si está todo bien. */
+async function validarAprobacion(env: Env, token: string): Promise<DatosToken | Response> {
   let datos: DatosToken;
   try {
     datos = await verificarToken(token, env.APPROVAL_SECRET);
   } catch (e) {
     return html('Enlace inválido', `<h1 class="err">Enlace inválido</h1><p>${escaparHtml((e as Error).message)}.</p>`, 400);
   }
-
   const fila = await env.DB.prepare('SELECT estado, payload_hash FROM invoice_runs WHERE factura_id = ?')
     .bind(datos.facturaId)
     .first<{ estado: string; payload_hash: string }>();
@@ -172,20 +179,50 @@ async function aprobar(req: Request, env: Env): Promise<Response> {
       409,
     );
   }
+  return datos;
+}
 
+// Abrir el enlace no aprueba. El canal de correo está expuesto a escáneres que
+// hacen prefetch de cada URL: con un GET con efecto de escritura, uno de esos
+// escáneres registraría la aprobación sin que nadie tocara nada. La acción es
+// el POST del botón, que un prefetch no envía.
+function paginaDeConfirmacion(datos: DatosToken, token: string): Response {
+  return html(
+    'Aprobar factura',
+    `<h1>Aprobar factura</h1>
+<p><b>${escaparHtml(datos.facturaId)}</b></p>
+<p>Abrir este enlace no aprueba nada. Al tocar el botón, el agente emitirá la factura en el SII en su próximo ciclo (máximo 30 minutos) y enviará el PDF al cliente automáticamente.</p>
+<form method="post" action="/aprobar">
+<input type="hidden" name="token" value="${escaparHtml(token)}">
+<button type="submit" style="font:inherit;font-size:1.1rem;padding:14px 28px;border:0;border-radius:8px;background:#0a7d40;color:#fff">Aprobar factura</button>
+</form>`,
+  );
+}
+
+async function registrarAprobacion(env: Env, datos: DatosToken): Promise<Response> {
   await env.DB.prepare(
     `INSERT INTO approvals (factura_id, actor, payload_hash, aprobado_en) VALUES (?, ?, ?, ?)
      ON CONFLICT(factura_id) DO UPDATE SET actor = excluded.actor, payload_hash = excluded.payload_hash, aprobado_en = excluded.aprobado_en`,
   )
     .bind(datos.facturaId, 'aprobacion-remota', datos.payloadHash, ahoraIso())
     .run();
-
   return html(
     'Factura aprobada',
     `<h1 class="ok">✓ Factura aprobada</h1>
 <p><b>${escaparHtml(datos.facturaId)}</b></p>
 <p>El agente la emitirá en el SII en su próximo ciclo (máximo 30 minutos) y enviará el PDF al cliente automáticamente.</p>`,
   );
+}
+
+async function aprobar(req: Request, env: Env): Promise<Response> {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return html('Método no permitido', '<h1 class="err">Método no permitido</h1>', 405);
+  }
+  if (!env.APPROVAL_SECRET) return html('Configuración', '<h1 class="err">Falta APPROVAL_SECRET en el Worker</h1>', 500);
+  const token = await leerToken(req);
+  const datos = await validarAprobacion(env, token);
+  if (datos instanceof Response) return datos;
+  return req.method === 'GET' ? paginaDeConfirmacion(datos, token) : registrarAprobacion(env, datos);
 }
 
 // ---------------------------------------------------------------- /telegram-webhook
