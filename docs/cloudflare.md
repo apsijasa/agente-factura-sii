@@ -107,10 +107,14 @@ volver a copiar esas filas a D1 antes de operar en Cloudflare.
 
 ## Volver a Supabase (plan B)
 
-El código de Supabase sigue en el repo. Si no existen `CF_API_URL`/`CF_API_TOKEN`
-y sí `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, el agente usa Supabase como
-antes (ver `esNubeCloudflare` / `esNubeSupabase` en `src/cli/entorno.ts`).
-Para eso también hay que revertir los gates de los workflows.
+El código de Supabase sigue en el repo, pero **ya no se elige por omisión**:
+hay que fijar `AGENTE_MODO=supabase` (y tener `SUPABASE_URL` +
+`SUPABASE_SERVICE_ROLE_KEY`). Sin esa variable, encontrar credenciales de
+Supabase sin las de Cloudflare es un error, no un plan B silencioso. Y un par
+incompleto de cualquiera de los dos (`CF_API_*` o `SUPABASE_*`) también lanza:
+perder media credencial no debe desviar la escritura a otra fuente de verdad
+(ver `esNubeCloudflare` / `esNubeSupabase` en `src/cli/entorno.ts`).
+Para volver también hay que revertir los gates de los workflows.
 
 ## Costos
 

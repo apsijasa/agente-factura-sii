@@ -4,7 +4,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { armarDependencias, esNube, esNubeSupabase, RAIZ, type Entorno } from '../../src/cli/entorno.js';
+import { armarDependencias, esNube, esNubeCloudflare, esNubeSupabase, RAIZ, type Entorno } from '../../src/cli/entorno.js';
 import { AuditStore } from '../../src/store/audit-store.js';
 import { AuditStoreSupabase } from '../../src/store/audit-store-supabase.js';
 import { AlmacenPdfLocal, AlmacenPdfR2, AlmacenPdfSupabase } from '../../src/services/almacen-pdf.js';
@@ -27,6 +27,7 @@ const CONFIG_PRUEBA = JSON.stringify({
 
 const CLAVES_ENTORNO = [
   'AGENTE_CONFIG_JSON', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'GRAPH_CLIENT_SECRET', 'CF_API_URL', 'CF_API_TOKEN',
+  'AGENTE_MODO',
 ] as const;
 const respaldo = Object.fromEntries(CLAVES_ENTORNO.map((k) => [k, process.env[k]]));
 
@@ -46,27 +47,61 @@ afterAll(() => {
   rmSync(join(RAIZ, RUTA_DATOS_PRUEBA), { recursive: true, force: true });
 });
 
+function limpiarNube(): void {
+  for (const k of ['CF_API_URL', 'CF_API_TOKEN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'AGENTE_MODO']) delete process.env[k];
+}
+
+// Perder media credencial no puede degradar en silencio a otra fuente de
+// verdad: para documentos tributarios, operar contra la copia equivocada sin
+// un error es peor que no operar.
 describe('esNube', () => {
-  it('Cloudflare exige URL y token, y tiene prioridad sobre Supabase', () => {
+  it('Cloudflare con el par completo tiene prioridad sobre Supabase', () => {
+    limpiarNube();
     process.env.SUPABASE_URL = 'https://x.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'llave';
     process.env.CF_API_URL = 'https://agente.workers.dev';
-    expect(esNubeSupabase()).toBe(true);
     process.env.CF_API_TOKEN = 'token';
-    expect(esNube()).toBe(true);
+    expect(esNubeCloudflare()).toBe(true);
     expect(esNubeSupabase()).toBe(false);
+    expect(esNube()).toBe(true);
   });
 
-  it('exige AMBAS credenciales del service role', () => {
-    delete process.env.CF_API_URL;
-    delete process.env.CF_API_TOKEN;
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    expect(esNube()).toBe(false);
+  it('con media credencial de Cloudflare lanza nombrando la que falta, en vez de caer a otro modo', () => {
+    limpiarNube();
+    process.env.CF_API_URL = 'https://agente.workers.dev';
     process.env.SUPABASE_URL = 'https://x.supabase.co';
-    expect(esNube()).toBe(false);
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'llave';
-    expect(esNube()).toBe(true);
+    expect(() => esNube()).toThrow(/falta CF_API_TOKEN/);
+    limpiarNube();
+    process.env.CF_API_TOKEN = 'token';
+    expect(() => esNube()).toThrow(/falta CF_API_URL/);
+  });
+
+  it('Supabase nunca se elige por omisión: con sus credenciales y sin Cloudflare lanza pidiendo AGENTE_MODO', () => {
+    limpiarNube();
+    process.env.SUPABASE_URL = 'https://x.supabase.co';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'llave';
+    expect(() => esNube()).toThrow(/AGENTE_MODO=supabase/);
+  });
+
+  it('AGENTE_MODO=supabase activa el plan B y exige su par completo', () => {
+    limpiarNube();
+    process.env.AGENTE_MODO = 'supabase';
+    process.env.SUPABASE_URL = 'https://x.supabase.co';
+    expect(() => esNube()).toThrow(/falta SUPABASE_SERVICE_ROLE_KEY/);
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'llave';
+    process.env.CF_API_URL = 'https://agente.workers.dev';
+    process.env.CF_API_TOKEN = 'token';
+    expect(esNubeSupabase()).toBe(true);
+    expect(esNubeCloudflare()).toBe(false);
+  });
+
+  it('un AGENTE_MODO desconocido lanza, y sin ninguna credencial es modo local', () => {
+    limpiarNube();
+    process.env.AGENTE_MODO = 'cloudflare';
+    expect(() => esNube()).toThrow(/AGENTE_MODO desconocido/);
+    limpiarNube();
+    expect(esNube()).toBe(false);
   });
 });
 
@@ -90,10 +125,11 @@ describe('armarDependencias', () => {
     }
   });
 
-  it('en modo nube Supabase (respaldo) elige AuditStoreSupabase, AlmacenPdfSupabase y Graph app-only', async () => {
+  it('en modo nube Supabase (plan B explícito) elige AuditStoreSupabase, AlmacenPdfSupabase y Graph app-only', async () => {
     process.env.AGENTE_CONFIG_JSON = CONFIG_PRUEBA;
     delete process.env.CF_API_URL;
     delete process.env.CF_API_TOKEN;
+    process.env.AGENTE_MODO = 'supabase';
     process.env.SUPABASE_URL = 'https://prueba.supabase.co';
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'llave-de-prueba';
     process.env.GRAPH_CLIENT_SECRET = 'secreto-de-prueba';

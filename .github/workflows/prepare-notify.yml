@@ -41,6 +41,10 @@ jobs:
     steps:
       - name: Verificar configuración
         run: |
+          if { [ -z "$CF_API_URL" ] && [ -n "$CF_API_TOKEN" ]; } || { [ -n "$CF_API_URL" ] && [ -z "$CF_API_TOKEN" ]; }; then
+            echo "::error::Credenciales de Cloudflare incompletas: falta CF_API_URL o CF_API_TOKEN; con media credencial el agente no opera"
+            exit 1
+          fi
           if [ -z "$AGENTE_CONFIG_JSON" ] || [ -z "$CF_API_URL" ]; then
             echo "::notice::Secretos aún no configurados (ver docs/cloudflare.md); nada que hacer."
             echo "CONFIGURADO=no" >> "$GITHUB_ENV"

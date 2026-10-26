@@ -86,30 +86,6 @@ revelar la causa en el próximo fallo.
 
 ---
 
-## 🟠 5. Perder media credencial desvía la escritura sin avisar
-
-**Archivo:** `src/cli/entorno.ts:40-43`
-
-```ts
-export const esNubeCloudflare = () => Boolean(process.env.CF_API_URL && process.env.CF_API_TOKEN);
-export const esNubeSupabase = () => !esNubeCloudflare() && Boolean(process.env.SUPABASE_URL && ...);
-```
-
-Si se pierde **solo** `CF_API_TOKEN` (una rotación, un typo), el agente no
-falla: cae a Supabase, que es una copia congelada al 15-10-2026. Y si los
-secretos de Supabase ya se borraron (tarea 6), cae a un SQLite **vacío** en el
-workspace efímero del runner. El gate de `emit-approved.yml` solo chequea
-`CF_API_URL`, no el token.
-
-Para documentos tributarios, operar contra la fuente de verdad equivocada sin
-un error es peor que no operar.
-
-**Arreglo:** si *cualquiera* de `CF_API_*` está presente, exigir ambas y lanzar.
-Igual para el par de Supabase. Y que el plan B se active con una variable
-explícita (`AGENTE_MODO=supabase`) en vez de por omisión.
-
----
-
 ## 🟠 6. Terminar el paso 8 de la migración: apagar Supabase
 
 `docs/cloudflare.md` lo deja como último paso, una vez que el ciclo del 25
@@ -208,6 +184,18 @@ si la clave existe, que se traduce en el 409 `YA_EXISTE` de siempre. La
 interfaz `R2Bucket` y el R2 falso de las pruebas entienden `onlyIf`. La prueba
 nueva anula `head` (simula la ventana de carrera) y exige que la segunda subida
 igual sea rechazada y el PDF original quede intacto.
+---
+
+## ✅ 5. Media credencial desviaba la escritura sin avisar — ARREGLADA (26-10-2026)
+
+`src/cli/entorno.ts`: si está presente *cualquiera* de `CF_API_URL`/`CF_API_TOKEN`
+se exigen ambas y, si falta una, el agente **lanza** nombrándola; igual para el
+par de Supabase. Supabase dejó de ser plan B por omisión: solo se activa con
+`AGENTE_MODO=supabase` explícito, y tener sus credenciales sin las de
+Cloudflare es un error, no un modo. Los gates de `emit-approved` y
+`solicitudes` y la verificación de `prepare-notify` y `cancelar` distinguen
+"sin configurar" (aviso y nada que hacer) de "media credencial" (`::error::`).
+Pruebas en `tests/cli/entorno.test.ts`.
 ---
 
 ## ✅ 8. Octubre — CERRADO (26-10-2026)

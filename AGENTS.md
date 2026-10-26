@@ -78,7 +78,10 @@ dejó de leer el campo `pnpm` de `package.json`; si vuelve a aparecer
 
 Desde el 15-10-2026 la nube corre en **Cloudflare**: auditoría en D1, PDFs en
 R2, aprobaciones por el Worker. Se activa con `CF_API_URL` + `CF_API_TOKEN`.
-Supabase quedó como respaldo y solo se usa si faltan esos dos.
+Supabase quedó como plan B y solo se usa con `AGENTE_MODO=supabase` explícito.
+Media credencial de cualquiera de los dos pares hace que el agente **lance**
+en vez de caer a otro modo: para documentos tributarios, escribir en la fuente
+de verdad equivocada sin un error es peor que no operar.
 
 ## Convenciones
 

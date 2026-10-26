@@ -35,12 +35,49 @@ import { logger } from '../services/logger.js';
 
 export const RAIZ = process.cwd();
 
-// Modo nube Cloudflare (preferente): auditoría en D1 y PDFs en R2, ambos vía
-// la API privada del Worker. Se activa con CF_API_URL + CF_API_TOKEN.
-export const esNubeCloudflare = (): boolean => Boolean(process.env.CF_API_URL && process.env.CF_API_TOKEN);
-// Modo nube Supabase (anterior, se mantiene como respaldo): solo si no hay Cloudflare.
-export const esNubeSupabase = (): boolean =>
-  !esNubeCloudflare() && Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+const PAR_CLOUDFLARE = ['CF_API_URL', 'CF_API_TOKEN'] as const;
+const PAR_SUPABASE = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] as const;
+
+// Media credencial no es "modo local": es escribir documentos tributarios en
+// la fuente de verdad equivocada sin que nada avise. Perder solo CF_API_TOKEN
+// (una rotación, un typo) dejaba al agente operando contra la copia congelada
+// de Supabase, o contra un SQLite vacío en el runner. Un par incompleto lanza.
+function parDeCredenciales(nombres: readonly string[], servicio: string): boolean {
+  const faltan = nombres.filter((n) => !process.env[n]);
+  if (faltan.length === nombres.length) return false;
+  if (faltan.length > 0) {
+    throw new Error(
+      `Credenciales de ${servicio} incompletas: falta ${faltan.join(' y ')}. ` +
+        'Con media credencial el agente no opera: escribiría en la fuente de verdad equivocada.',
+    );
+  }
+  return true;
+}
+
+// Modo nube Cloudflare (vigente): auditoría en D1 y PDFs en R2, ambos vía la
+// API privada del Worker. Se activa con CF_API_URL + CF_API_TOKEN.
+export const esNubeCloudflare = (): boolean =>
+  process.env.AGENTE_MODO !== 'supabase' && parDeCredenciales(PAR_CLOUDFLARE, 'Cloudflare');
+
+// Modo nube Supabase (plan B): solo a pedido explícito con AGENTE_MODO=supabase,
+// nunca por omisión. Que existan sus credenciales no basta para elegirlo.
+export const esNubeSupabase = (): boolean => {
+  const modo = process.env.AGENTE_MODO;
+  if (modo === 'supabase') {
+    if (!parDeCredenciales(PAR_SUPABASE, 'Supabase')) {
+      throw new Error('AGENTE_MODO=supabase exige SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY');
+    }
+    return true;
+  }
+  if (modo !== undefined) throw new Error(`AGENTE_MODO desconocido: "${modo}" (solo se admite "supabase")`);
+  if (parDeCredenciales(PAR_SUPABASE, 'Supabase') && !esNubeCloudflare()) {
+    throw new Error(
+      'Supabase ya no es el modo por omisión: hay credenciales de Supabase y ninguna de Cloudflare. ' +
+        'Si de verdad quiere el plan B, fije AGENTE_MODO=supabase.',
+    );
+  }
+  return false;
+};
 export const esNube = (): boolean => esNubeCloudflare() || esNubeSupabase();
 
 // Cache de tokens Microsoft cifrado (la llave vive en el llavero): evita

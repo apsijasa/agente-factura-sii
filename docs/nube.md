@@ -185,7 +185,7 @@ El mismo código sirve para ambos; el modo se activa por variables de entorno:
 
 | Variable | Efecto |
 |---|---|
-| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Auditoría en Postgres y PDFs en el bucket (en vez de SQLite y `cliente/`) |
+| `AGENTE_MODO=supabase` + `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Auditoría en Postgres y PDFs en el bucket (en vez de SQLite y `cliente/`). Hoy es el plan B: el modo vigente es Cloudflare (`docs/cloudflare.md`) y Supabase solo se activa con `AGENTE_MODO` explícito |
 | `AGENTE_CONFIG_JSON` | Configuración desde el entorno (en vez de `.data/config.json`) |
 | `GRAPH_CLIENT_SECRET` | Graph con client credentials (en vez de device code) |
 | `SII_CLAVE` / `SII_CLAVE_FIRMA` | Claves desde el entorno (en vez del llavero de macOS) |
