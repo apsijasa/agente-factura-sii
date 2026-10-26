@@ -29,8 +29,6 @@ jobs:
       CF_API_URL: ${{ secrets.CF_API_URL }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
-      SII_CLAVE: ${{ secrets.SII_CLAVE }}
-      SII_CLAVE_FIRMA: ${{ secrets.SII_CLAVE_FIRMA }}
       APPROVAL_SECRET: ${{ secrets.APPROVAL_SECRET }}
       APPROVAL_URL: ${{ secrets.APPROVAL_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

@@ -39,10 +39,6 @@ jobs:
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       # Graph: `ejecutarCancel` refleja el resultado en tblFacturas, no solo en D1.
       GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
-      # El preflight de `conEntorno` comprueba que exista la credencial del
-      # emisor (en la nube la lee de SII_CLAVE). Sin ella aborta antes de
-      # llegar a `cancel`, aunque este comando nunca abra el portal.
-      SII_CLAVE: ${{ secrets.SII_CLAVE }}
     steps:
       # Las entradas viajan por entorno y no interpoladas en el `run`: este job
       # tiene credenciales de Cloudflare y del SII, y un input incrustado en la

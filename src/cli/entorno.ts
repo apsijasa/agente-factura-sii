@@ -174,9 +174,15 @@ export async function armarDependencias(): Promise<Entorno> {
   return { deps, repo: new FacturasRepository(store, excel), rutEmisor: primerEmisor, graph, config, rutaDatos, rl, appOnly, supabase, solicitudes };
 }
 
+export interface OpcionesEntorno {
+  /** false para comandos que nunca abren el portal: el preflight no exige la clave del SII. */
+  usaSii?: boolean;
+}
+
 export async function conEntorno(
   verificarGraph: boolean,
   fn: (deps: Dependencias, repo: FacturasRepository, entorno: Entorno) => Promise<void>,
+  opciones: OpcionesEntorno = {},
 ): Promise<void> {
   const entorno = await armarDependencias();
   const { deps, repo, rutEmisor, graph, config, rutaDatos, rl, appOnly } = entorno;
@@ -186,6 +192,7 @@ export async function conEntorno(
         verificarGraph,
         appOnly,
         verificarRutaClientes: !esNube(),
+        verificarSecretoSii: opciones.usaSii ?? true,
       });
       if (!chequeo.ok) {
         throw new Error(`Preflight falló:\n- ${chequeo.fallas.join('\n- ')}`);

@@ -17,6 +17,10 @@ export interface OpcionesPreflight {
   appOnly?: boolean;
   // En modo nube los PDFs van al bucket; la carpeta local cliente/ no aplica.
   verificarRutaClientes?: boolean;
+  // La clave del SII es la credencial más importante del sistema: solo se exige
+  // a los comandos que van a abrir el portal. Exigirla a `cancel` o `notify`
+  // obligaba a repartirla a workflows que jamás la usan.
+  verificarSecretoSii?: boolean;
 }
 
 export async function preflight(
@@ -41,10 +45,12 @@ export async function preflight(
     }
   }
 
-  try {
-    await leerSecreto(rutEmisor);
-  } catch (e) {
-    fallas.push((e as Error).message);
+  if (opciones.verificarSecretoSii ?? true) {
+    try {
+      await leerSecreto(rutEmisor);
+    } catch (e) {
+      fallas.push((e as Error).message);
+    }
   }
 
   if (opciones.verificarGraph) {

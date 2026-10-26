@@ -31,7 +31,7 @@ programa
     await conEntorno(true, async (deps) => {
       const r = await ejecutarPrepare(deps, opciones.date);
       console.log(JSON.stringify(r, null, 2));
-    });
+    }, { usaSii: false });
   });
 
 programa
@@ -52,7 +52,7 @@ programa
   .command('retry-email')
   .requiredOption('--invoice <factura_id>')
   .action(async (opciones: { invoice: string }) => {
-    await conEntorno(true, (deps) => ejecutarRetryEmail(deps, opciones.invoice));
+    await conEntorno(true, (deps) => ejecutarRetryEmail(deps, opciones.invoice), { usaSii: false });
   });
 
 programa
@@ -73,7 +73,7 @@ programa
         ahora: () => new Date(),
       });
       console.log(JSON.stringify({ notificadas }, null, 2));
-    });
+    }, { usaSii: false });
   });
 
 programa
@@ -96,7 +96,7 @@ programa
         ahora: () => new Date(),
       });
       console.log(JSON.stringify({ ...resultado, notificadas }, null, 2));
-    });
+    }, { usaSii: false });
   });
 
 programa
@@ -142,7 +142,7 @@ programa
   .requiredOption('--invoice <factura_id>')
   .requiredOption('--motivo <texto>', 'motivo de la cancelación (queda en la auditoría y en tblFacturas)')
   .action(async (opciones: { invoice: string; motivo: string }) => {
-    await conEntorno(true, (deps) => ejecutarCancel(deps, opciones.invoice, opciones.motivo));
+    await conEntorno(true, (deps) => ejecutarCancel(deps, opciones.invoice, opciones.motivo), { usaSii: false });
   });
 
 programa

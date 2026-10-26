@@ -61,6 +61,16 @@ describe('preflight', () => {
     expect(resultado.fallas.some((f) => f.includes('llavero'))).toBe(true);
   });
 
+  it('no exige la clave del SII a un comando que no abre el portal', async () => {
+    const resultado = await preflight(await configBase(), graphFalso([]), '12345678-5', {
+      verificarGraph: false,
+      leerSecreto: secretoFalla,
+      verificarSecretoSii: false,
+    });
+    expect(resultado.ok).toBe(true);
+    expect(resultado.fallas).toEqual([]);
+  });
+
   it('agrega la falla de ruta raíz de clientes inaccesible', async () => {
     const config = await configBase({ rutaRaizClientes: '/ruta/que/no/existe/preflight' });
     const resultado = await preflight(config, graphFalso([]), '12345678-5', {

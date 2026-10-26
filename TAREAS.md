@@ -109,7 +109,6 @@ Hacer **5 antes que 6**.
 |---|---|---|
 | B3 | `/aprobar` es un GET con efecto de escritura. Mitigado en Telegram y WhatsApp, queda expuesto el canal de correo: un escáner que haga prefetch registraría la aprobación. Preexistente. Cierre: GET muestra botón, POST confirma | `cloudflare/src/index.ts` |
 | N2 | `.data/config.json` apunta a `Documents/Codex/agente factura sii/cliente`, la ruta anterior del repo. En modo nube no molesta (la comprobación se salta), pero **cualquier comando local falla en el preflight** | `.data/config.json` → `rutaRaizClientes` |
-| N3 | **El preflight exige la clave del SII a comandos que nunca abren el portal.** `preflight` llama a `leerSecreto(rutEmisor)` sin condición, así que `cancel`, `notify`, `retry-email` y `procesar-solicitudes` necesitan `SII_CLAVE` solo para pasar el chequeo. Obliga a repartir la credencial más importante del sistema a workflows que no la usan. Debería verificarse solo cuando el comando vaya a tocar el SII, con una opción como la que ya existe para `verificarRutaClientes` | `src/config/preflight.ts:44-47` |
 
 ---
 
@@ -204,6 +203,7 @@ Pruebas en `tests/cli/entorno.test.ts`.
 | B4 | `migrar-pdfs-r2.yml` lleva `concurrency: facturacion-sii` como los otros cinco workflows |
 | B5 | Todo el HTML de `/aprobar` sale con `Cache-Control: no-store` (verificado en la prueba de aprobación) |
 | N1 | `abrirYPreparar` reintenta hasta 3 veces (5 s, 10 s) la navegación login → empresa → formulario cuando el navegador reporta un corte de conexión (`net::ERR_CONNECTION_RESET` y afines). Solo eso: cualquier otro error se propaga al primer intento, y el tramo posterior a la firma no cambia. Política en `src/adapters/sii/reintento-red.ts`, probada en `tests/adapters/reintento-red.test.ts` |
+| N3 | El preflight solo exige la clave del SII cuando el comando va a abrir el portal (`verificarSecretoSii`, que `conEntorno` toma de `usaSii`). `prepare`, `notify`, `procesar-solicitudes`, `retry-email` y `cancel` pasan `usaSii: false`, y los workflows `prepare-notify`, `solicitudes` y `cancelar` dejaron de recibir `SII_CLAVE`/`SII_CLAVE_FIRMA`; solo `emit-approved` las tiene. Prueba en `tests/config/preflight.test.ts` |
 
 ---
 
