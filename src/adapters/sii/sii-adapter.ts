@@ -3,6 +3,8 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { compararTotales, extraerFolio, type TotalesSii } from './parse.js';
 import { SELECTORES } from './selectores.js';
 import { VigilanteFolio } from './vigilante-folio.js';
+import { conReintentoDeRed } from './reintento-red.js';
+import { logger } from '../../services/logger.js';
 import type { InvoicePayload } from '../../domain/tipos.js';
 
 /**
@@ -140,9 +142,11 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     }
   }
 
-  async abrirYPreparar(payload: InvoicePayload): Promise<void> {
-    const pagina = await this.paginaActiva();
-    await this.cerrarVentanasDeLaFacturaAnterior();
+  /**
+   * Login → selección de empresa → formulario. Solo navegación: no escribe
+   * nada, por eso se puede repetir entera si el portal corta la conexión.
+   */
+  private async navegarAlFormulario(pagina: Page, payload: InvoicePayload): Promise<void> {
     await pagina.goto(SELECTORES.urlEmisionFactura);
     // El SII redirige primero al login (zeus*.sii.cl/AUT2000). La página de login
     // también tiene un campo "RUT", así que el agente NO debe tocar nada hasta que
@@ -169,6 +173,19 @@ export class SiiAdapterPlaywright implements ISiiAdapter {
     if (!/mipeGenFacEx/i.test(pagina.url())) {
       await pagina.goto(SELECTORES.urlFormularioFactura);
     }
+  }
+
+  async abrirYPreparar(payload: InvoicePayload): Promise<void> {
+    const pagina = await this.paginaActiva();
+    await this.cerrarVentanasDeLaFacturaAnterior();
+    // El 26-10-2026 el portal cortó la conexión dos veces en mipeSelEmpresa.cgi
+    // (net::ERR_CONNECTION_RESET) y hubo que repetir el ciclo entero a mano.
+    // Reintentar aquí es seguro: aún no se escribió nada ni se firmó.
+    await conReintentoDeRed(() => this.navegarAlFormulario(pagina, payload), {
+      intentos: 3,
+      esperaMs: 5_000,
+      avisar: (mensaje) => logger.warn(mensaje),
+    });
     // Autenticado: ahora sí esperar el formulario de emisión y llenarlo.
     // Ante CUALQUIER problema se guarda evidencia local (captura + HTML) en
     // .data/evidence (fuera de Git) para calibrar selectores contra el portal real.
