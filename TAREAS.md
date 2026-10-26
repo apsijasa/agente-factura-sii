@@ -107,7 +107,6 @@ Hacer **5 antes que 6**.
 
 | | Qué | Dónde |
 |---|---|---|
-| B1 | El error crudo de D1 se responde al chat de Telegram | `cloudflare/src/index.ts:217` |
 | B3 | `/aprobar` es un GET con efecto de escritura. Mitigado en Telegram y WhatsApp, queda expuesto el canal de correo: un escáner que haga prefetch registraría la aprobación. Preexistente. Cierre: GET muestra botón, POST confirma | `cloudflare/src/index.ts` |
 | B4 | `migrar-pdfs-r2.yml` es el único workflow sin `concurrency: facturacion-sii` | `.github/workflows/` |
 | B5 | Falta `Cache-Control: no-store` en el HTML de `/aprobar` | `cloudflare/src/index.ts:108-118` |
@@ -204,6 +203,7 @@ Pruebas en `tests/cli/entorno.test.ts`.
 | M2 | `ApiCloudflare` tiene timeout (`AbortSignal.timeout`, 30 s) y reintento acotado (3 intentos) reutilizando `conReintentos` de Graph: red, timeout y 5xx se reintentan; cualquier 4xx (el 409 del CAS, `YA_EXISTE`, `FACTURA_DUPLICADA`) es respuesta y no se repite. `ErrorApiCloudflare` hereda de `HttpError` para eso. Pruebas en `tests/store/api-cloudflare.test.ts` |
 | M3 | Un `expiraEn` no parseable (NaN) ya no es "nunca vence": tanto el Worker como el firmante en Node lo rechazan como token inválido (vencimiento). Pruebas en `tests/services/token-aprobacion.test.ts` y `tests/cloudflare/worker.test.ts` |
 | M4 | El Worker valida la entrada de `crear-factura` (`payload` texto JSON con `factura_id` y `lineas` no vacías, `hash`) y responde 400 con el motivo en vez de 500; lo mismo para un cuerpo que no es JSON en las rutas `/api/*` y para una clave de PDF inválida. Prueba en `tests/cloudflare/worker.test.ts` |
+| B1 | El mensaje crudo de D1 ya no se responde al chat de Telegram: el chat recibe un aviso genérico y el detalle queda en el log del Worker (`console.error`). Prueba en `tests/cloudflare/worker.test.ts` |
 
 ---
 

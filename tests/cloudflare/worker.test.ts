@@ -126,6 +126,26 @@ describe('Worker /telegram-webhook', () => {
     const fila = cf.db.prepare('SELECT estado, factura_id FROM solicitudes_facturas WHERE id = 1').get();
     expect(fila).toEqual({ estado: 'PROCESADA', factura_id: 'PUNTUAL:X' });
   });
+  it('si D1 falla, el chat recibe un aviso genérico y el error crudo queda en el log', async () => {
+    const telegram = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', telegram);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const cf = crearCloudflareFalso({ TELEGRAM_WEBHOOK_SECRET: 's3', TELEGRAM_CHAT_ID: '42', TELEGRAM_BOT_TOKEN: 'bot' });
+    const original = cf.env.DB.prepare.bind(cf.env.DB);
+    vi.spyOn(cf.env.DB, 'prepare').mockImplementation((sql: string) => {
+      if (/INSERT INTO solicitudes_facturas/.test(sql)) throw new Error('D1_ERROR: no such table: solicitudes_facturas');
+      return original(sql);
+    });
+    const res = await cf.llamarWorker('https://agente.test/telegram-webhook', {
+      method: 'POST', headers: { 'x-telegram-bot-api-secret-token': 's3' }, body: cuerpo('/factura CLI-022 250000 Asesoría'),
+    });
+    expect(res.status).toBe(200);
+    const enviado = JSON.parse((telegram.mock.calls[0] as unknown as [string, RequestInit])[1].body as string) as { text: string };
+    expect(enviado.text).toContain('No pude registrar la solicitud');
+    expect(enviado.text).not.toMatch(/D1_ERROR|no such table/);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('telegram-webhook'), expect.stringContaining('no such table'));
+    log.mockRestore();
+  });
 });
 
 describe('Worker /api', () => {

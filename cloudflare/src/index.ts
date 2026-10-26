@@ -237,7 +237,14 @@ async function telegramWebhook(req: Request, env: Env): Promise<Response> {
           'el resumen de la factura con su enlace de aprobación. Nada se emite sin tu aprobación.',
       );
     } catch (e) {
-      await responderTelegram(env, chatId, `⚠️ No pude registrar la solicitud: ${(e as Error).message}`);
+      // El detalle (mensaje crudo de D1) va al log del Worker, no al chat:
+      // describe el esquema y la infraestructura, y al operador no le sirve.
+      console.error('telegram-webhook: no se pudo registrar la solicitud', (e as Error).message);
+      await responderTelegram(
+        env,
+        chatId,
+        '⚠️ No pude registrar la solicitud. Inténtalo de nuevo en unos minutos; si persiste, revisa el log del Worker.',
+      );
     }
     return new Response('ok');
   }
