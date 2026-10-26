@@ -1,94 +1,17 @@
 # Tareas pendientes
 
-Estado al **26-10-2026**. Verificado contra el repo en `09cf9e4`, los workflows
-de GitHub y una revisión de código de la migración a Cloudflare.
+Estado al **26-10-2026**. Verificado contra el repo, los workflows de GitHub y
+una revisión de código de la migración a Cloudflare.
 
 Lee `AGENTS.md` antes de tomar cualquiera de estas. Cada tarea trae dónde
 mirar y cómo comprobar que quedó bien.
 
----
+**Cómo se usa:** quien termina una tarea la marca ✅ y la baja a "Resueltas",
+en el mismo commit del arreglo. Lo resuelto se conserva un tiempo porque
+explica por qué el código quedó como quedó; cuando estorbe, se borra —el
+historial de git lo guarda igual.
 
-## 🔴 0. Workflow para cancelar una factura preparada
-
-**Se necesita ahora:** la factura `RECURRENT:EMP-001:CLI-031:2026-10` (SOCIEDAD
-MMP, $122.024 aprox.) quedó preparada el 25-10 y **no se debe emitir**: el
-cliente se desactivó en el Excel después de prepararla (`COB-011` y `CLI-031`
-quedaron con `activo = NO`). Mientras siga en `PENDIENTE_APROBACION`, el agente
-reenvía su enlace de aprobación todos los días.
-
-**Por qué un workflow y no el CLI local:** `cancel` existe
-(`src/cli/index.ts:140`) pero necesita `CF_API_URL` y `CF_API_TOKEN` para
-escribir en D1. Ese token vive como **GitHub Secret, que es de solo escritura**:
-no se puede recuperar para ponerlo en una terminal. Sin esas variables el agente
-cae a modo local y cancelaría en el SQLite local, que no es la fuente de verdad.
-
-### Qué construir
-
-`.github/workflows/cancelar.yml`, con disparo **solo manual**
-(`workflow_dispatch`, sin `schedule`) y dos entradas obligatorias:
-
-| Entrada | Qué es |
-|---|---|
-| `invoice` | `factura_id` completo. Formatos válidos: `RECURRENT:<empresa>:<cliente>:<AAAA-MM>` y `PUNTUAL:<empresa>:<cliente>:<fecha>:<id>` |
-| `motivo` | Texto libre no vacío. Queda en la auditoría y en `tblFacturas`. |
-
-Ejecuta:
-```
-pnpm agent cancel --invoice "$INVOICE" --motivo "$MOTIVO"
-```
-
-### Requisitos
-
-- **Las entradas viajan por `env:`, nunca interpoladas en el `run:`.** Este job
-  lleva credenciales del SII y de Cloudflare; un input incrustado en la shell es
-  inyección de comandos. Copia el patrón ya resuelto en
-  `prepare-notify.yml` (paso "Preparar facturas del día").
-- **Validar `invoice` contra un patrón** antes de pasarlo, y fallar con
-  `::error::` si no calza. Validar que `motivo` no venga vacío.
-- `concurrency: group: facturacion-sii`, `cancel-in-progress: false`, igual que
-  los otros cuatro workflows.
-- Secretos necesarios: `CF_API_URL`, `CF_API_TOKEN`, `AGENTE_CONFIG_JSON` y
-  `GRAPH_CLIENT_SECRET`. Los dos últimos porque `ejecutarCancel`
-  (`src/cli/comandos.ts:260-273`) refleja el resultado en `tblFacturas` vía
-  Microsoft Graph, no solo en la auditoría.
-- **No** instalar Chromium: este comando jamás toca el SII.
-- Mismo chequeo de configuración que los demás: si faltan secretos, terminar sin
-  ruido en vez de reventar.
-
-### Lo que NO hay que tocar
-
-`ejecutarCancel` ya tiene las guardas correctas y **no se modifican**: exige
-motivo no vacío, y solo cancela desde los estados anteriores a la emisión
-(`ESTADOS_CANCELABLES`). Una factura ya emitida no se puede cancelar por acá —
-eso es una nota de crédito en el portal, no una transición de estado.
-
-### Cómo verificar
-
-1. Dispararlo con un `factura_id` inexistente → debe fallar con "Factura no
-   encontrada", sin tocar nada.
-2. Dispararlo con un `invoice` malformado → debe fallar en la validación, antes
-   de llegar al agente.
-3. Dispararlo con `RECURRENT:EMP-001:CLI-031:2026-10` y un motivo real → la
-   factura queda `CANCELADA` y deja de aparecer en las notificaciones diarias.
-4. Confirmar que el ciclo siguiente de `prepare-notify` ya **no** la vuelve a
-   preparar (el cobro está `activo = NO`, así que no debería).
-
----
-
-## ✅ 1. `pnpm install` en una clonación nueva — RESUELTA (26-10-2026)
-
-La causa era que pnpm 11 **renombró** `onlyBuiltDependencies` a `allowBuilds` y
-dejó de leer el campo `pnpm` de `package.json`. El archivo correcto siempre fue
-`pnpm-workspace.yaml`; lo que había cambiado era la clave.
-
-Quedó: `pnpm-workspace.yaml` con `allowBuilds`, `packageManager: pnpm@12.14.0`
-en `package.json` como única fuente de verdad de la versión, y los seis
-workflows sin `version: 10` para que CI tome esa misma. Verificado en una copia
-limpia: `pnpm install --frozen-lockfile && pnpm test` sin pasos manuales.
-
-**Ojo con CI:** desde este cambio los workflows corren con **pnpm 12 en vez de
-10**. Se validó con el workflow "Probar canal de notificaciones", que ejercita
-`pnpm install --frozen-lockfile` sin tocar facturas ni el SII.
+Para trabajar una: *"Lee AGENTS.md y TAREAS.md. Implementa la tarea 3."*
 
 ---
 
@@ -107,63 +30,6 @@ puede quedar "listo" en `main` sin estar vivo.
 `CLOUDFLARE_API_TOKEN` en secretos), con disparo manual como mínimo. Si se hace
 automático al tocar `cloudflare/**`, hay que pensar bien la guarda: desplegar
 el Worker a mitad de un ciclo de emisión no es inocuo.
-
----
-
-## ✅ 2. El token de aprobación se rompía con acentos — ARREGLADA (26-10-2026)
-
-Arreglado en `cloudflare/src/index.ts`: el cuerpo del token se convierte a
-bytes y se decodifica con `TextDecoder` (UTF-8), que es lo que escribió el
-firmante en Node. La prueba nueva en `tests/cloudflare/worker.test.ts` usa un
-`factura_id` con tilde y **falla sin el arreglo** (404, "Factura no
-encontrada"), así que no puede volver a romperse en silencio.
-
-**Pendiente:** el arreglo no llega a producción hasta correr `wrangler deploy`
-desde `cloudflare/` (ver tarea 2b).
-
-<details>
-<summary>Descripción original</summary>
-
-## 🔴 2. El token de aprobación se decodifica mal: se rompe con acentos
-
-**Archivo:** `cloudflare/src/index.ts:97`
-
-```ts
-datos = JSON.parse(atob(cuerpo.replaceAll('-', '+').replaceAll('_', '/')));
-```
-
-`atob()` devuelve latin1. El firmante en Node usa
-`Buffer.from(cuerpo, 'base64url').toString()`, que decodifica UTF-8. Las dos
-mitades divergen apenas el `factura_id` tenga un byte no ASCII. Comprobado:
-
-```
-node  : RECURRENT:ACME:ASESORÍA LTDA:2026-10
-worker: RECURRENT:ACME:ASESORÃA LTDA:2026-10
-```
-
-**Por qué importa:** el `factura_id` se arma con el `cliente_id` del Excel, que
-escribe una persona a mano y no tiene ninguna validación ASCII. Si alguien crea
-un cliente con tilde o `ñ`, la firma HMAC valida igual (el base64 es ASCII),
-pero el `SELECT` no encuentra la fila y responde 404 "Factura no encontrada".
-La factura queda atascada en `PENDIENTE_APROBACION` y el agente reenvía el
-mismo enlace roto cada ciclo, sin ningún mensaje que apunte a la causa.
-
-**Falla cerrada** — nunca aprueba algo equivocado. Pero bloquea el camino
-crítico. Hoy no afecta a nadie: los clientes actuales van de `CLI-021` a
-`CLI-031`, todos ASCII. Es una trampa esperando al primer cliente con tilde.
-
-**Arreglo:**
-```ts
-const bin = atob(cuerpo.replaceAll('-', '+').replaceAll('_', '/'));
-const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-datos = JSON.parse(new TextDecoder().decode(bytes)) as DatosToken;
-```
-
-**Verificar:** agregar a `tests/cloudflare/worker.test.ts` un caso con
-`factura_id` acentuado. El arnés ya corre el Worker real en Node, así que
-reproduce el bug tal cual; solo falta que algún fixture deje de ser ASCII.
-
-</details>
 
 ---
 
@@ -294,19 +160,6 @@ Hacer **5 antes que 6**.
 
 ---
 
-## 🔵 8. Operativo: octubre está esperando
-
-Las **10 facturas del 25-10 están preparadas y notificadas**, ninguna aprobada.
-El gate responde `[]`.
-
-Hay que aprobarlas desde Telegram y emitirlas. **De a una** mientras la tarea 4
-siga abierta.
-
-Clientes del lote: CLI-021, 022, 023, 024, 025, 027, 028, 029, 030, 031.
-(CLI-026 / JUNCAL está desactivado desde agosto.)
-
----
-
 ## 🔵 9. Pendiente de agosto sin cerrar
 
 El **PDF del folio 42** (DISUADE SPA) nunca le llegó al cliente. La factura se
@@ -314,6 +167,66 @@ emitió bien y es válida, pero quedó en `REQUIERE_REVISION` porque el agente n
 supo leer el folio — fue el caso que destapó el bug del parser.
 
 Hay que bajarlo del portal del SII y enviarlo a mano. No requiere código.
+
+---
+
+## Resueltas
+
+*Se dejan por un tiempo: explican por qué el código quedó como quedó.*
+
+---
+
+## ✅ 0. Workflow para cancelar una factura preparada — HECHA (26-10-2026)
+
+`.github/workflows/cancelar.yml`: disparo solo manual, entradas por entorno y
+validadas, exige `CF_API_TOKEN` además de la URL. Estrenado en producción
+cancelando `RECURRENT:EMP-001:CLI-031:2026-10` (cliente desactivado en el
+Excel después de prepararla).
+
+---
+
+## ✅ 1. `pnpm install` en una clonación nueva — RESUELTA (26-10-2026)
+
+La causa era que pnpm 11 **renombró** `onlyBuiltDependencies` a `allowBuilds` y
+dejó de leer el campo `pnpm` de `package.json`. El archivo correcto siempre fue
+`pnpm-workspace.yaml`; lo que había cambiado era la clave.
+
+Quedó: `pnpm-workspace.yaml` con `allowBuilds`, `packageManager: pnpm@12.14.0`
+en `package.json` como única fuente de verdad de la versión, y los seis
+workflows sin `version: 10` para que CI tome esa misma. Verificado en una copia
+limpia: `pnpm install --frozen-lockfile && pnpm test` sin pasos manuales.
+
+**Ojo con CI:** desde este cambio los workflows corren con **pnpm 12 en vez de
+10**. Se validó con el workflow "Probar canal de notificaciones", que ejercita
+`pnpm install --frozen-lockfile` sin tocar facturas ni el SII.
+
+---
+
+## ✅ 2. El token de aprobación se rompía con acentos — ARREGLADA (26-10-2026)
+
+Arreglado en `cloudflare/src/index.ts`: el cuerpo del token se convierte a
+bytes y se decodifica con `TextDecoder` (UTF-8), que es lo que escribió el
+firmante en Node. La prueba nueva en `tests/cloudflare/worker.test.ts` usa un
+`factura_id` con tilde y **falla sin el arreglo** (404, "Factura no
+encontrada"), así que no puede volver a romperse en silencio.
+
+**Pendiente:** el arreglo no llega a producción hasta correr `wrangler deploy`
+desde `cloudflare/` (ver tarea 2b).
+
+
+---
+
+## ✅ 8. Octubre — CERRADO (26-10-2026)
+
+9 emitidas (CLI-021, 022, 023, 024, 025, 027, 028, 029, 030) y 1 cancelada
+(CLI-031, cliente desactivado). Verificado contra el RCV oficial: 9 facturas,
+ninguna de más.
+
+Se emitió **de a una** porque la tarea 4 sigue abierta. Dos facturas fallaron
+con `ERR_CONNECTION_RESET` del portal antes de firmar y salieron al reintentar
+(ver N1 en la tarea 7).
+
+**Próximo lote: 25 de noviembre.**
 
 ---
 
