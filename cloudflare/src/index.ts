@@ -67,6 +67,17 @@ function igualesTiempoConstante(a: string, b: string): boolean {
   return distinto === 0;
 }
 
+/** Entrada malformada del agente: se responde 400, nunca 500 (eso sería una falla del Worker). */
+class ErrorEntrada extends Error {}
+
+async function leerJson<T>(req: Request): Promise<T> {
+  try {
+    return (await req.json()) as T;
+  } catch {
+    throw new ErrorEntrada('el cuerpo no es JSON');
+  }
+}
+
 function escaparHtml(texto: string): string {
   return texto.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
@@ -252,9 +263,31 @@ interface LineaPayload {
   total_linea_clp: number;
 }
 
+interface PayloadFactura {
+  factura_id: string;
+  lineas: LineaPayload[];
+}
+
+// Sin esto, un payload sin `lineas` reventaba en `payload.lineas.map` con 500.
+function validarPayloadFactura(payloadTexto: string): PayloadFactura {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(payloadTexto);
+  } catch {
+    throw new ErrorEntrada('payload no es JSON');
+  }
+  const p = payload as Partial<PayloadFactura> | null;
+  if (typeof p?.factura_id !== 'string' || !p.factura_id) throw new ErrorEntrada('payload sin factura_id');
+  if (!Array.isArray(p.lineas) || p.lineas.length === 0) throw new ErrorEntrada('payload sin lineas');
+  return p as PayloadFactura;
+}
+
 /** Ex RPC crear_factura: factura + líneas + evento de creación en UNA transacción (batch). */
 export async function crearFactura(db: D1Database, payloadTexto: string, hash: string): Promise<'ok' | 'FACTURA_DUPLICADA'> {
-  const payload = JSON.parse(payloadTexto) as { factura_id: string; lineas: LineaPayload[] };
+  if (typeof payloadTexto !== 'string' || typeof hash !== 'string' || !hash) {
+    throw new ErrorEntrada('crear-factura exige payload (texto) y hash');
+  }
+  const payload = validarPayloadFactura(payloadTexto);
   const id = payload.factura_id;
   const existe = await db.prepare('SELECT 1 AS x FROM invoice_runs WHERE factura_id = ?').bind(id).first();
   if (existe) return 'FACTURA_DUPLICADA';
@@ -307,7 +340,7 @@ export async function registrarTransicion(
 
 function validarClavePdf(clave: string | null): string {
   if (!clave || clave.startsWith('/') || clave.includes('..') || !clave.endsWith('.pdf')) {
-    throw new Error('clave de PDF inválida');
+    throw new ErrorEntrada('clave de PDF inválida');
   }
   return clave;
 }
@@ -319,17 +352,17 @@ async function api(req: Request, env: Env, ruta: string): Promise<Response> {
   }
   try {
     if (ruta === '/api/query' && req.method === 'POST') {
-      const { sql, params } = (await req.json()) as { sql: string; params?: unknown[] };
+      const { sql, params } = await leerJson<{ sql: string; params?: unknown[] }>(req);
       const r = await env.DB.prepare(sql).bind(...(params ?? [])).all();
       return json({ results: r.results, changes: r.meta.changes });
     }
     if (ruta === '/api/crear-factura' && req.method === 'POST') {
-      const { payload, hash } = (await req.json()) as { payload: string; hash: string };
+      const { payload, hash } = await leerJson<{ payload: string; hash: string }>(req);
       const r = await crearFactura(env.DB, payload, hash);
       return r === 'ok' ? json({ ok: true }) : json({ error: r }, 409);
     }
     if (ruta === '/api/registrar-transicion' && req.method === 'POST') {
-      const b = (await req.json()) as { factura_id: string; desde: string; hacia: string; detalle: string };
+      const b = await leerJson<{ factura_id: string; desde: string; hacia: string; detalle: string }>(req);
       const r = await registrarTransicion(env.DB, b.factura_id, b.desde, b.hacia, b.detalle);
       return r === 'ok' ? json({ ok: true }) : json({ error: r }, 409);
     }
@@ -365,6 +398,7 @@ async function api(req: Request, env: Env, ruta: string): Promise<Response> {
     }
     return json({ error: 'ruta no encontrada' }, 404);
   } catch (e) {
+    if (e instanceof ErrorEntrada) return json({ error: e.message }, 400);
     return json({ error: (e as Error).message }, 500);
   }
 }

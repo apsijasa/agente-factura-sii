@@ -148,6 +148,19 @@ describe('Worker /api', () => {
     expect((await store.obtenerEventos(payload.factura_id)).map((e) => e.detalle)).toEqual(['creación', 'preparación']);
   });
 
+  it('una entrada malformada en crear-factura responde 400 y no inserta nada (antes era 500)', async () => {
+    const cf = crearCloudflareFalso();
+    const headers = { Authorization: `Bearer ${TOKEN_PRUEBA}`, 'Content-Type': 'application/json' };
+    const sinLineas = await cf.llamarWorker('https://agente.test/api/crear-factura', {
+      method: 'POST', headers, body: JSON.stringify({ payload: JSON.stringify({ factura_id: 'X' }), hash: 'h' }),
+    });
+    expect(sinLineas.status).toBe(400);
+    expect(await sinLineas.json()).toEqual({ error: 'payload sin lineas' });
+    const noJson = await cf.llamarWorker('https://agente.test/api/crear-factura', { method: 'POST', headers, body: '{' });
+    expect(noJson.status).toBe(400);
+    expect(cf.db.prepare('SELECT count(*) AS n FROM invoice_runs').get()).toEqual({ n: 0 });
+  });
+
   it('crear factura duplicada no deja filas a medias', async () => {
     const { store, db } = await facturaPendiente();
     await expect(store.crearFactura(payload, 'hash-2')).rejects.toThrow('ya existe');
