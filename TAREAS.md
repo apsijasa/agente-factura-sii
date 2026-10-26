@@ -107,7 +107,6 @@ Hacer **5 antes que 6**.
 
 | | Qué | Dónde |
 |---|---|---|
-| M2 | `ApiCloudflare` sin timeout ni reintento. Si el `fetch` de `guardarFolio` cuelga, el folio sobrevive solo en `state_events.detalle`. Son `UPDATE` idempotentes: un `AbortSignal.timeout()` con reintento es seguro y no roza el invariante de "una sola emisión" | `src/store/api-cloudflare.ts:29-44` |
 | M3 | Un `expiraEn` no parseable da `NaN`, y `ahora > NaN` es `false`: el enlace nunca vence. Va firmado, así que no es explotable, pero el invariante queda dependiendo del firmante | `cloudflare/src/index.ts:102` y `src/services/token-aprobacion.ts:47` |
 | M4 | `crearFactura` del Worker no valida la entrada: sin `lineas` revienta con 500 en vez de 400 | `cloudflare/src/index.ts:244-248` |
 | B1 | El error crudo de D1 se responde al chat de Telegram | `cloudflare/src/index.ts:217` |
@@ -196,6 +195,13 @@ Cloudflare es un error, no un modo. Los gates de `emit-approved` y
 `solicitudes` y la verificación de `prepare-notify` y `cancelar` distinguen
 "sin configurar" (aviso y nada que hacer) de "media credencial" (`::error::`).
 Pruebas en `tests/cli/entorno.test.ts`.
+---
+
+## ✅ 7. Arreglos menores de la revisión — ítems resueltos
+
+| | Qué quedó |
+|---|---|
+| M2 | `ApiCloudflare` tiene timeout (`AbortSignal.timeout`, 30 s) y reintento acotado (3 intentos) reutilizando `conReintentos` de Graph: red, timeout y 5xx se reintentan; cualquier 4xx (el 409 del CAS, `YA_EXISTE`, `FACTURA_DUPLICADA`) es respuesta y no se repite. `ErrorApiCloudflare` hereda de `HttpError` para eso. Pruebas en `tests/store/api-cloudflare.test.ts` |
 ---
 
 ## ✅ 8. Octubre — CERRADO (26-10-2026)
