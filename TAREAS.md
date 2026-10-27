@@ -65,20 +65,26 @@ revelar la causa en el próximo fallo.
 
 ---
 
-## 🟠 6. Terminar el paso 8 de la migración: apagar Supabase
+## 🟠 6. Apagar Supabase — a medias (27-10-2026)
 
-`docs/cloudflare.md` lo deja como último paso, una vez que el ciclo del 25
-haya corrido en Cloudflare. Ya corrió: octubre se preparó y notificó bien.
+**Hecho:** borrados los secretos `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`
+de GitHub. Nada los leía desde el 15-10 y la service-role key salta todas las
+restricciones de la base, así que no tenía por qué seguir ahí.
 
-- Borrar los secretos `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` de GitHub.
-- Pausar o eliminar el proyecto en Supabase.
+El riesgo que esta tarea advertía ya no existe: los cuatro workflows exigen
+`CF_API_URL` antes de hacer nada, así que sin credenciales de Cloudflare el
+agente no opera — nunca cae a un SQLite vacío ni a una copia vieja.
 
-**Antes de borrar nada:** confirmar que D1 tiene todo lo que Supabase alcanzó a
-escribir después del 15-10-2026. Y ojo con el orden — mientras exista la tarea
-5, borrar los secretos de Supabase convierte una pérdida de `CF_API_TOKEN` en
-"escribe en un SQLite vacío" en vez de "escribe en una copia vieja".
+**Falta:**
 
-Hacer **5 antes que 6**.
+- Comparar `invoice_runs` de Supabase contra D1 (36 filas, última escritura
+  2026-10-27). El 27-10 Supabase dio timeout en tres intentos pese a figurar
+  `ACTIVE_HEALTHY`; hay que despertarlo abriéndolo en el panel.
+- Recién con esa comparación en mano: pausar o eliminar el proyecto.
+- Borrar `.github/workflows/migrar-pdfs-r2.yml`. Era la migración única de
+  PDFs y ya no puede correr sin los secretos, pero **se deja hasta que la
+  comparación confirme que no quedó ningún PDF sin migrar**: si quedara, esa
+  es la herramienta para traerlo.
 
 ---
 
