@@ -45,7 +45,7 @@ function depsNube(): Dependencias {
       extraerPreview: vi.fn(async () => ({ totales: { netoClp: 100000, ivaClp: 19000, totalClp: 119000 }, coinciden: true, diferencias: [] })),
       emitirUnaVez: vi.fn(async () => ({ folio: '77', pdf: Buffer.from('%PDF-1.4\n%%EOF\n') })),
       consultarDocumentosEmitidos: vi.fn(async () => null),
-      cerrar: vi.fn(),
+      cerrar: vi.fn(async () => undefined),
     } as never,
     correo: { enviarFactura: vi.fn(async () => undefined) } as never,
     aprobacion: new AprobacionRemota(store),
@@ -160,6 +160,22 @@ describe('ejecutarEmitAprobadas', () => {
     await ejecutarEmitAprobadas(deps);
 
     expect(deps.sii.cerrar as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+  });
+
+  // El cierre va en un `finally`: si lanzara, su excepción reemplazaría el
+  // flujo y escaparía del try/catch, abortando el lote entero. Y lanza justo
+  // cuando el navegador quedó mal, que es cuando una factura falla.
+  it('un fallo al cerrar el navegador no tumba el lote ni se come el resultado', async () => {
+    const deps = depsNube();
+    await ejecutarPrepare(deps, '2026-07-05');
+    const fila = await deps.store.obtenerFactura(FACTURA);
+    await deps.store.registrarAprobacion(FACTURA, 'aprobacion-remota', fila!.payload_hash, '2026-07-05T12:30:00Z');
+    (deps.sii.cerrar as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('navegador ya murió'));
+
+    const resultado = await ejecutarEmitAprobadas(deps);
+
+    expect(resultado.emitidas).toEqual([FACTURA]);
+    expect((await deps.store.obtenerFactura(FACTURA))?.estado).toBe('ENVIADA');
   });
 
   it('no abre ni cierra nada si ninguna factura tiene aprobación vigente', async () => {

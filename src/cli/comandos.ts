@@ -434,7 +434,17 @@ export async function ejecutarEmitAprobadas(deps: Dependencias): Promise<Resulta
       // Cuesta ~20 s de login por factura, precio barato frente a repetir una
       // emisión a mano. El diagnóstico de `5b3171d` sigue puesto para cuando
       // el fallo vuelva a aparecer.
-      await deps.sii.cerrar();
+      //
+      // El error se traga a propósito: una excepción en un `finally` reemplaza
+      // el flujo y escapa del catch de arriba, y `cerrar()` lanza justo cuando
+      // el navegador quedó mal — es decir, cuando una factura acaba de fallar.
+      // Dejarlo propagar abortaría el lote y, peor, una factura ya emitida
+      // quedaría fuera del resultado.
+      try {
+        await deps.sii.cerrar();
+      } catch (error) {
+        logger.warn(`No se pudo cerrar el navegador tras ${facturaId}: ${(error as Error).message}`);
+      }
     }
   }
   return resultado;
