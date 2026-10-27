@@ -306,7 +306,7 @@ export async function ejecutarNotify(
     );
     const mensaje =
       `${resumenAprobacion(payload, deps.pdfs.rutaPrevista(payload.nombre_carpeta, payload.fecha_emision))}\n\n` +
-      `Para APROBAR la emisión de esta factura abra este enlace:\n` +
+      `Para APROBAR la emisión de esta factura abra este enlace y toque el botón:\n` +
       `${opciones.urlAprobacion}?token=${token}\n\n` +
       `Si NO corresponde emitirla, no haga nada: el enlace expira en ${opciones.vigenciaHoras} horas ` +
       `y nada se emite sin su aprobación.`;
