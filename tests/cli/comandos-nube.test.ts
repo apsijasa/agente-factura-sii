@@ -135,6 +135,42 @@ describe('ejecutarEmitAprobadas', () => {
     expect((deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
+  // Lote del 25-08-2026: con el navegador compartido fallaron 5 de 11 y 2 de 4,
+  // alternadas. De a una, 15 de 15 salieron bien. Cerrar entre facturas replica
+  // esas condiciones: `cerrar()` deja navegador y página en null, así que la
+  // siguiente relanza y vuelve a autenticarse.
+  it('cierra el navegador después de cada factura, para que la siguiente arranque limpia', async () => {
+    const deps = depsNube();
+    await ejecutarPrepare(deps, '2026-07-05');
+    const fila = await deps.store.obtenerFactura(FACTURA);
+    await deps.store.registrarAprobacion(FACTURA, 'aprobacion-remota', fila!.payload_hash, '2026-07-05T12:30:00Z');
+
+    await ejecutarEmitAprobadas(deps);
+
+    expect(deps.sii.cerrar as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+  });
+
+  it('también lo cierra cuando la factura falla', async () => {
+    const deps = depsNube();
+    await ejecutarPrepare(deps, '2026-07-05');
+    const fila = await deps.store.obtenerFactura(FACTURA);
+    await deps.store.registrarAprobacion(FACTURA, 'aprobacion-remota', fila!.payload_hash, '2026-07-05T12:30:00Z');
+    (deps.sii.emitirUnaVez as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('portal caído'));
+
+    await ejecutarEmitAprobadas(deps);
+
+    expect(deps.sii.cerrar as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+  });
+
+  it('no abre ni cierra nada si ninguna factura tiene aprobación vigente', async () => {
+    const deps = depsNube();
+    await ejecutarPrepare(deps, '2026-07-05');
+
+    await ejecutarEmitAprobadas(deps);
+
+    expect(deps.sii.cerrar as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
   it('un fallo del SII deja la factura fuera de circulación y no detiene el ciclo', async () => {
     const deps = depsNube();
     await ejecutarPrepare(deps, '2026-07-05');

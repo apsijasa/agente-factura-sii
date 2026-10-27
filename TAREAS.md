@@ -20,7 +20,7 @@ topas con una trabajando en otra cosa, **detente y avisa** en vez de resolverla:
 
 | | Por qué |
 |---|---|
-| **4** | Sin causa raíz. El arreglo propuesto es un rodeo y **solo se valida con un lote real**; no hay forma de comprobarlo en frío |
+| **4** | El rodeo ya está puesto, pero sin causa raíz y **sin validar**: solo un lote real lo comprueba. No lo des por cerrado ni lo toques en frío |
 | **6** | Borra secretos y pausa un proyecto. Irreversible, y depende de que la 5 esté verificada en producción |
 
 El resto sí se puede tomar de corrido, siempre con los cuatro chequeos en verde
@@ -28,12 +28,11 @@ antes de cada commit.
 
 ---
 
-## 🟠 4. Emitir varias facturas en una corrida falla una de cada dos
+## 🟠 4. Emitir varias facturas en una corrida — rodeo puesto, sin validar
 
-**Archivo:** `src/cli/comandos.ts:413` (`ejecutarEmitAprobadas`)
+**Archivo:** `src/cli/comandos.ts` (`ejecutarEmitAprobadas`)
 
-El bucle llama a `ejecutarEmit` reutilizando **el mismo navegador** para todas
-las facturas. Historial medido:
+El bucle reutilizaba **el mismo navegador** para todas las facturas. Historial:
 
 | Fecha | Modo | Resultado |
 |---|---|---|
@@ -41,27 +40,29 @@ las facturas. Historial medido:
 | 25-08 | lote de 4 | 2 fallaron |
 | 25-08 y 30-09 | de a una | 15 de 15 bien |
 
-El patrón es estrictamente alternado: éxito, fallo, éxito, fallo. **La causa
-raíz no está diagnosticada.** Lo que se descartó: no es el parser del folio
-(arreglado en `5e61212`), no es la acumulación de ventanas (arreglado en
-`f3dd281`). Las páginas de firma son idénticas; la divergencia ocurre después
+El patrón es estrictamente alternado. **La causa raíz sigue sin diagnosticar.**
+Descartado: no es el parser del folio (`5e61212`) ni la acumulación de ventanas
+(`f3dd281`). Las páginas de firma son idénticas; la divergencia ocurre después
 de pulsar Firmar.
 
-**Importante:** cuando falla, **no deja documento emitido** — verificado contra
-el RCV oficial de agosto (los folios 46, 48, 50, 52, 54 y 56 no existen). Falla
-cerrada. El costo es operativo: hay que repetir a mano.
+Cuando falla **no deja documento emitido** — verificado contra el RCV oficial
+de agosto (los folios 46, 48, 50, 52, 54 y 56 no existen). Falla cerrada; el
+costo es operativo.
 
-**Arreglo propuesto** (no implementado): cerrar el navegador entre facturas con
-`deps.sii.cerrar()` en un `finally` dentro del bucle. `cerrar()` deja
-`navegador` y `pagina` en `null`, así que la siguiente llamada relanza y vuelve
-a autenticarse — replica exactamente las condiciones de "de a una", que nunca
-fallaron. Cuesta ~20 s de login por factura.
+**Hecho (27-10-2026):** `deps.sii.cerrar()` en un `finally` dentro del bucle.
+Cierra el navegador después de cada factura, con éxito o con fallo, así que la
+siguiente relanza y vuelve a autenticarse: las condiciones de "de a una", que
+nunca fallaron. Cuesta ~20 s de login por factura.
 
-No arregla la causa raíz: la esquiva. Pero el diagnóstico que se agregó en
-`5b3171d` (la alerta del portal y la última URL viajan en el error) debería
-revelar la causa en el próximo fallo.
+**Esto esquiva el problema, no lo arregla.** El diagnóstico de `5b3171d` (la
+alerta del portal y la última URL viajan en el error) sigue puesto para cuando
+el fallo reaparezca.
 
-**Verificar:** solo se comprueba con un lote real. No lo pruebes el día 25.
+**Falta validarlo, y solo se puede con un lote real.** Las pruebas cubren el
+mecanismo (que se cierra después de cada factura y también cuando falla), no
+que el lote salga bien: eso no se puede comprobar en frío. La ocasión es el
+ciclo del 25 de noviembre, aprobando varias facturas seguidas en vez de de a
+una. **No lo pruebes por primera vez ese mismo día sin estar mirando.**
 
 ---
 

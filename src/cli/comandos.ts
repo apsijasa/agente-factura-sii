@@ -423,6 +423,18 @@ export async function ejecutarEmitAprobadas(deps: Dependencias): Promise<Resulta
     } catch (error) {
       logger.error(`Emisión de ${facturaId} falló: ${(error as Error).message}`);
       resultado.fallidas.push(facturaId);
+    } finally {
+      // Reusar el navegador entre facturas hacía fallar una de cada dos, de
+      // forma estrictamente alternada: 5 de 11 y 2 de 4 el 25-08-2026, contra
+      // 15 de 15 bien emitiendo de a una. `cerrar()` deja navegador y página
+      // en null, así que la siguiente factura relanza y vuelve a autenticarse:
+      // son exactamente las condiciones que nunca fallaron.
+      //
+      // Esto NO arregla la causa raíz, que sigue sin diagnosticar; la esquiva.
+      // Cuesta ~20 s de login por factura, precio barato frente a repetir una
+      // emisión a mano. El diagnóstico de `5b3171d` sigue puesto para cuando
+      // el fallo vuelva a aparecer.
+      await deps.sii.cerrar();
     }
   }
   return resultado;
