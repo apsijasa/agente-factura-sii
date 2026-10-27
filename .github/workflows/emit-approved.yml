@@ -50,7 +50,12 @@ jobs:
     needs: gate
     if: needs.gate.outputs.hay_trabajo == 'si'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Desde que el lote cierra el navegador entre facturas, cada una paga su
+    # propio login (~20 s). Una corrida de una factura tomó 108 s medidos, así
+    # que un lote de 11 ronda los 17 min: cabía en 30, pero sin margen para un
+    # portal lento. Un timeout a mitad del lote deja facturas sin emitir el
+    # día 25, y el costo de subirlo es nulo mientras el job termine bien.
+    timeout-minutes: 45
     env:
       AGENTE_CONFIG_JSON: ${{ secrets.AGENTE_CONFIG_JSON }}
       CF_API_URL: ${{ secrets.CF_API_URL }}
