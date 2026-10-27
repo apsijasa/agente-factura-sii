@@ -209,11 +209,12 @@ programa
       const empresaId = await rl.question('empresa_id del emisor: ');
       const tipoVenta = await rl.question('Tipo de venta SII para este emisor: ');
       const tipoCompra = await rl.question('Tipo de compra SII para este emisor: ');
-      const rutaRaizClientes = join(RAIZ, 'cliente');
+      // Sin `rutaRaizClientes`: `cargarConfig` la resuelve contra la raíz del
+      // proyecto. Grabarla absoluta rompía la configuración al mover el repo.
       const config = {
         tenantId, clientId, buzonPrincipal,
         driveId: item.parentReference.driveId, itemId: item.id,
-        rutaRaizClientes, rutaDatos: '.data',
+        rutaDatos: '.data',
         timeoutSiiMs: 120000, timeoutAprobacionMs: 300000,
         modoPredeterminado: 'simulation',
         emisores: { [empresaId]: { tipoVenta, tipoCompra } },

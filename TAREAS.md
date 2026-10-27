@@ -22,8 +22,6 @@ topas con una trabajando en otra cosa, **detente y avisa** en vez de resolverla:
 |---|---|
 | **4** | Sin causa raíz. El arreglo propuesto es un rodeo y **solo se valida con un lote real**; no hay forma de comprobarlo en frío |
 | **6** | Borra secretos y pausa un proyecto. Irreversible, y depende de que la 5 esté verificada en producción |
-| **9** | No es código: es entrar al portal del SII y enviarle un documento a un cliente |
-| **N2** | Es `.data/config.json`, archivo local de la máquina del operador y fuera de git |
 
 El resto sí se puede tomar de corrido, siempre con los cuatro chequeos en verde
 antes de cada commit.
@@ -81,24 +79,6 @@ escribir después del 15-10-2026. Y ojo con el orden — mientras exista la tare
 "escribe en un SQLite vacío" en vez de "escribe en una copia vieja".
 
 Hacer **5 antes que 6**.
-
----
-
-## 🟡 7. Arreglos menores de la revisión
-
-| | Qué | Dónde |
-|---|---|---|
-| N2 | `.data/config.json` apunta a `Documents/Codex/agente factura sii/cliente`, la ruta anterior del repo. En modo nube no molesta (la comprobación se salta), pero **cualquier comando local falla en el preflight** | `.data/config.json` → `rutaRaizClientes` |
-
----
-
-## 🔵 9. Pendiente de agosto sin cerrar
-
-El **PDF del folio 42** (DISUADE SPA) nunca le llegó al cliente. La factura se
-emitió bien y es válida, pero quedó en `REQUIERE_REVISION` porque el agente no
-supo leer el folio — fue el caso que destapó el bug del parser.
-
-Hay que bajarlo del portal del SII y enviarlo a mano. No requiere código.
 
 ---
 
@@ -188,7 +168,7 @@ Pruebas en `tests/cli/entorno.test.ts`.
 
 ---
 
-## ✅ 7. Arreglos menores de la revisión — ítems resueltos
+## ✅ 7. Arreglos menores de la revisión — CERRADA (27-10-2026)
 
 | | Qué quedó |
 |---|---|
@@ -200,6 +180,7 @@ Pruebas en `tests/cli/entorno.test.ts`.
 | B5 | Todo el HTML de `/aprobar` sale con `Cache-Control: no-store` (verificado en la prueba de aprobación) |
 | N1 | `abrirYPreparar` reintenta hasta 3 veces (5 s, 10 s) la navegación login → empresa → formulario cuando el navegador reporta un corte de conexión (`net::ERR_CONNECTION_RESET` y afines). Solo eso: cualquier otro error se propaga al primer intento, y el tramo posterior a la firma no cambia. Política en `src/adapters/sii/reintento-red.ts`, probada en `tests/adapters/reintento-red.test.ts` |
 | N3 | El preflight solo exige la clave del SII cuando el comando va a abrir el portal (`verificarSecretoSii`, que `conEntorno` toma de `usaSii`). `prepare`, `notify`, `procesar-solicitudes`, `retry-email` y `cancel` pasan `usaSii: false`, y los workflows `prepare-notify`, `solicitudes` y `cancelar` dejaron de recibir `SII_CLAVE`/`SII_CLAVE_FIRMA`; solo `emit-approved` las tiene. Prueba en `tests/config/preflight.test.ts` |
+| N2 | `rutaRaizClientes` dejó de guardarse como ruta absoluta. `cargarConfig` la resuelve en cada carga contra la raíz del proyecto: ausente o relativa apunta a `<raíz>/cliente`, y una absoluta ya configurada se respeta. `setup` ya no la graba. Mover la carpeta del repo ya no rompe los comandos locales en el preflight. Pruebas en `tests/config/config.test.ts` |
 | B3 | `/aprobar` ya no escribe en el GET: muestra la factura y un botón, y la aprobación la registra el POST que envía ese botón (token en el formulario). Un escáner de enlaces que haga prefetch no aprueba nada. Las validaciones (firma, vencimiento, estado, hash) corren igual en ambos. Prueba: dos GET seguidos no dejan aprobación y el POST sí |
 
 ---
@@ -215,6 +196,21 @@ con `ERR_CONNECTION_RESET` del portal antes de firmar y salieron al reintentar
 (ver N1 en la tarea 7).
 
 **Próximo lote: 25 de noviembre.**
+
+---
+
+## ✅ 9. Pendiente de agosto — CERRADO (27-10-2026)
+
+El **PDF del folio 42** (DISUADE SPA) nunca le llegó al cliente: la factura se
+emitió bien ante el SII, pero quedó en `REQUIERE_REVISION` porque el agente no
+supo leer el folio. Fue el caso que destapó el bug del parser.
+
+El operador regularizó a DISUADE a mano. No quedan documentos pendientes de
+entrega.
+
+La fila de `RECURRENT:EMP-001:CLI-029:2026-08` **sigue en `REQUIERE_REVISION` y
+así debe quedarse**: es estado terminal y es el registro de que ese día algo
+salió mal. No bloquea nada — el gate de emisión solo mira `APROBADA`.
 
 ---
 

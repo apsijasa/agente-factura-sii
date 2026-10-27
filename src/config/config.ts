@@ -1,6 +1,6 @@
 // src/config/config.ts
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { esRutValido } from '../domain/rut.js';
 
@@ -10,7 +10,8 @@ export const esquemaConfig = z.object({
   buzonPrincipal: z.string().email(),
   driveId: z.string().min(1),
   itemId: z.string().min(1),
-  rutaRaizClientes: z.string().min(1),
+  // Opcional y, si viene, relativa a la raíz del proyecto. Ver `resolverRutas`.
+  rutaRaizClientes: z.string().min(1).optional(),
   rutaDatos: z.string().min(1).default('.data'),
   timeoutSiiMs: z.number().int().positive().default(120000),
   timeoutAprobacionMs: z.number().int().positive().default(300000),
@@ -35,14 +36,30 @@ export const esquemaConfig = z.object({
     .refine((e) => Object.keys(e).length > 0, 'Debe configurarse al menos un emisor'),
 });
 
-export type Config = z.output<typeof esquemaConfig>;
+type ConfigArchivo = z.output<typeof esquemaConfig>;
+export type Config = ConfigArchivo & { rutaRaizClientes: string };
+
+/**
+ * `setup` grababa aquí la ruta **absoluta** del repo. Mover la carpeta del
+ * proyecto dejaba esa ruta apuntando a un lugar inexistente y todos los
+ * comandos locales morían en el preflight, sin que nada hubiera cambiado.
+ * Ahora se resuelve en cada carga contra la raíz del proyecto: ausente o
+ * relativa apunta a `<raíz>/cliente`, y una absoluta ya configurada se
+ * respeta tal cual.
+ */
+function resolverRutas(config: ConfigArchivo, raizProyecto: string): Config {
+  return {
+    ...config,
+    rutaRaizClientes: resolve(raizProyecto, config.rutaRaizClientes ?? 'cliente'),
+  };
+}
 
 export async function cargarConfig(raizProyecto: string): Promise<Config> {
   // Modo nube (GitHub Actions): la configuración completa llega por entorno
   // como secreto del repositorio, sin archivo en disco.
   const desdeEntorno = process.env.AGENTE_CONFIG_JSON;
   if (desdeEntorno) {
-    return esquemaConfig.parse(JSON.parse(desdeEntorno));
+    return resolverRutas(esquemaConfig.parse(JSON.parse(desdeEntorno)), raizProyecto);
   }
   const ruta = join(raizProyecto, '.data', 'config.json');
   let crudo: string;
@@ -51,5 +68,5 @@ export async function cargarConfig(raizProyecto: string): Promise<Config> {
   } catch {
     throw new Error(`No existe ${ruta}. Ejecute: pnpm agent setup`);
   }
-  return esquemaConfig.parse(JSON.parse(crudo));
+  return resolverRutas(esquemaConfig.parse(JSON.parse(crudo)), raizProyecto);
 }
