@@ -166,6 +166,35 @@ el enlace de aprobación → apruebas → se emite en el próximo ciclo. **Nada 
 emite sin tu aprobación**, igual que siempre. Si la solicitud tiene un error
 (cliente inexistente, monto malo), el bot te responde explicando qué corregir.
 
+### Clientes nuevos (/cliente-nuevo)
+
+Si el cliente **no existe** en `tblClientes`, `/factura` lo rechaza. Para darlo
+de alta, también desde el bot:
+
+```
+/cliente-nuevo <rut> <correo> <razón social>
+```
+
+Ejemplo: `/cliente-nuevo 78123456-7 pagos@fulano.cl Constructora Fulano SpA`
+
+Solo pide esos tres datos. **Giro, dirección, comuna y ciudad quedan vacíos a
+propósito**: el formulario del SII los precarga desde el RUT al emitir (el blur
+del dígito verificador en `sii-adapter.ts`), y el libro solo los usa como
+respaldo.
+
+El alta **no emite ni prepara ninguna factura**. Esa separación es deliberada:
+el agente te confirma con qué código y razón social quedó el cliente, y recién
+entonces pides la factura con `/factura`. Así lees a quién le estás facturando
+**antes** de que exista documento alguno — con un comando único, el mensaje de
+aprobación solo podría mostrarte un RUT, y un dedazo en un RUT que igual exista
+emite una factura real a un desconocido, que solo se deshace con nota de
+crédito.
+
+Dos defensas más: el dígito verificador se valida antes de escribir nada, y un
+RUT que ya esté en el libro se rechaza indicándote con qué `cliente_id`
+facturarle (un duplicado dejaría a `resolverCliente` ambiguo y sin poder
+facturarle a ninguno de los dos).
+
 Configuración (una vez):
 
 1. En Supabase → Edge Functions → Secrets, agregar:

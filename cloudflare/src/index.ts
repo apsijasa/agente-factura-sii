@@ -228,14 +228,22 @@ async function aprobar(req: Request, env: Env): Promise<Response> {
 // ---------------------------------------------------------------- /telegram-webhook
 
 const AYUDA =
-  'Comandos disponibles:\n' +
-  '/factura <cliente> <monto> <descripción>\n\n' +
+  'Comandos disponibles:\n\n' +
+  '/factura <cliente> <monto> <descripción>\n' +
   'Ejemplos:\n' +
   '/factura CLI-022 250000 Asesoría contable julio\n' +
   '/factura "SOCIEDAD PM" 250000 Asesoría contable\n' +
   '/factura CLI-025 33,5UF Consultoría especial\n\n' +
+  '/cliente-nuevo <rut> <correo> <razón social>\n' +
+  'Ejemplo:\n' +
+  '/cliente-nuevo 78123456-7 pagos@fulano.cl Constructora Fulano SpA\n' +
+  'Da de alta un cliente que no está en el libro. No emite nada: después le ' +
+  'facturas con /factura. Giro y dirección los completa el SII desde el RUT.\n\n' +
   'El monto es NETO (sin IVA). El agente valida el cliente, calcula el IVA y te ' +
   'envía el resumen con el enlace de aprobación antes de emitir nada.';
+
+/** Comandos que el agente procesa en su ciclo; el webhook solo los encola. */
+const COMANDOS = ['/factura', '/cliente-nuevo'] as const;
 
 async function responderTelegram(env: Env, chatId: string, texto: string): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) return;
@@ -266,14 +274,18 @@ async function telegramWebhook(req: Request, env: Env): Promise<Response> {
   // Mensajes de chats no autorizados se ignoran en silencio (sin filtrar información).
   if (!texto || !env.TELEGRAM_CHAT_ID || chatId !== env.TELEGRAM_CHAT_ID) return new Response('ok');
 
-  if (texto.startsWith('/factura')) {
+  const comando = COMANDOS.find((c) => texto.startsWith(c));
+  if (comando) {
     try {
       await env.DB.prepare('INSERT INTO solicitudes_facturas (chat_id, texto) VALUES (?, ?)').bind(chatId, texto).run();
       await responderTelegram(
         env,
         chatId,
-        'Solicitud recibida ✓\n\nEl agente la validará en el próximo ciclo (máximo 30 minutos) y te enviará ' +
-          'el resumen de la factura con su enlace de aprobación. Nada se emite sin tu aprobación.',
+        comando === '/cliente-nuevo'
+          ? 'Solicitud recibida ✓\n\nEl agente dará de alta al cliente en el próximo ciclo (máximo 30 minutos) ' +
+            'y te confirmará con qué código facturarle. Esto no emite ninguna factura.'
+          : 'Solicitud recibida ✓\n\nEl agente la validará en el próximo ciclo (máximo 30 minutos) y te enviará ' +
+            'el resumen de la factura con su enlace de aprobación. Nada se emite sin tu aprobación.',
       );
     } catch (e) {
       // El detalle (mensaje crudo de D1) va al log del Worker, no al chat:

@@ -3,6 +3,8 @@
 // resolución del cliente contra el maestro del Excel. El webhook guarda el
 // texto crudo; aquí vive TODA la interpretación (testeada), y los errores son
 // mensajes pensados para leerse en el propio chat.
+import { esRutValido, normalizarRut } from '../domain/rut.js';
+import { parsearDestinatarios } from '../domain/validacion.js';
 import type { Cliente, Moneda } from '../domain/tipos.js';
 
 export interface SolicitudParseada {
@@ -10,6 +12,12 @@ export interface SolicitudParseada {
   moneda: Moneda;
   monto: number;
   glosa: string;
+}
+
+export interface SolicitudClienteParseada {
+  rut: string;
+  email: string;
+  razonSocial: string;
 }
 
 const FORMATO =
@@ -85,4 +93,75 @@ export function resolverCliente(clientes: Cliente[], clienteTexto: string): Clie
     `Cliente no encontrado: "${clienteTexto}". Use el cliente_id (ej. CLI-022) o parte única de la razón social ` +
       'de un cliente ACTIVO de tblClientes.',
   );
+}
+
+const FORMATO_CLIENTE =
+  'Formato: /cliente-nuevo <rut> <correo> <razón social>\n' +
+  'Ejemplo: /cliente-nuevo 78123456-7 pagos@fulano.cl Constructora Fulano SpA';
+
+/**
+ * Alta de un cliente puntual desde Telegram. Solo pide los tres datos que el
+ * padrón del SII NO puede dar: el RUT (para buscarlo), el correo (para enviar
+ * el PDF) y la razón social (para que el operador vea a quién le factura en el
+ * mensaje de aprobación, antes de que exista documento alguno).
+ *
+ * Giro, dirección, comuna y ciudad se dejan vacíos a propósito: el formulario
+ * del SII los precarga desde el RUT al emitir (`sii-adapter.ts`, el blur del
+ * DV), y el libro solo los usa como respaldo.
+ */
+export function parsearSolicitudCliente(texto: string): SolicitudClienteParseada {
+  const limpio = texto.trim();
+  if (!limpio.startsWith('/cliente-nuevo')) {
+    throw new Error(`La solicitud debe comenzar con /cliente-nuevo.\n${FORMATO_CLIENTE}`);
+  }
+  const [rutCrudo, emailCrudo, ...resto] = limpio.slice('/cliente-nuevo'.length).trim().split(/\s+/);
+
+  if (!rutCrudo) throw new Error(`Falta el RUT.\n${FORMATO_CLIENTE}`);
+  // El dígito verificador es la única defensa contra un dedazo antes de emitir:
+  // un RUT mal tipeado que igual exista le factura a un desconocido.
+  const rut = normalizarRut(rutCrudo);
+  if (!rut || !esRutValido(rut)) {
+    throw new Error(`RUT inválido (dígito verificador no calza): "${rutCrudo}".\n${FORMATO_CLIENTE}`);
+  }
+
+  if (!emailCrudo) throw new Error(`Falta el correo de facturación.\n${FORMATO_CLIENTE}`);
+  try {
+    parsearDestinatarios(emailCrudo);
+  } catch {
+    throw new Error(`Correo inválido: "${emailCrudo}".\n${FORMATO_CLIENTE}`);
+  }
+
+  const razonSocial = resto.join(' ').trim();
+  if (razonSocial.length < 3) {
+    throw new Error(`Falta la razón social del cliente.\n${FORMATO_CLIENTE}`);
+  }
+
+  return { rut, email: emailCrudo, razonSocial };
+}
+
+const RE_CLIENTE_ID = /^CLI-(\d+)$/i;
+
+/** Siguiente correlativo libre de tblClientes, conservando el ancho (CLI-032). */
+export function siguienteClienteId(existentes: string[]): string {
+  const numeros = existentes
+    .map((id) => RE_CLIENTE_ID.exec(id.trim()))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => Number(m[1]));
+  const siguiente = (numeros.length === 0 ? 0 : Math.max(...numeros)) + 1;
+  return `CLI-${String(siguiente).padStart(3, '0')}`;
+}
+
+/**
+ * Nombre de carpeta para los PDFs del cliente. Va a parar a la clave de R2
+ * (`facturas/<carpeta>/AAAA/MM/...`), y el Worker rechaza claves con '/' o
+ * '..' — una razón social sin sanear haría fallar la subida justo después de
+ * tener folio, que es el peor momento para fallar.
+ */
+export function carpetaDesdeRazonSocial(razonSocial: string): string {
+  const limpio = razonSocial
+    .replace(/[/\\]/g, ' ')
+    .replace(/\.{2,}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return limpio || 'SIN NOMBRE';
 }

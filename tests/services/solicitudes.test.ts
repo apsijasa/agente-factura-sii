@@ -1,6 +1,12 @@
 // tests/services/solicitudes.test.ts
 import { describe, expect, it } from 'vitest';
-import { parsearSolicitudFactura, resolverCliente } from '../../src/services/solicitudes.js';
+import {
+  parsearSolicitudCliente,
+  parsearSolicitudFactura,
+  resolverCliente,
+  carpetaDesdeRazonSocial,
+  siguienteClienteId,
+} from '../../src/services/solicitudes.js';
 import type { Cliente } from '../../src/domain/tipos.js';
 
 describe('parsearSolicitudFactura', () => {
@@ -91,5 +97,74 @@ describe('resolverCliente', () => {
 
   it('excluye a los clientes inactivos', () => {
     expect(() => resolverCliente(clientes, 'INACTIVA')).toThrow(/no encontr/i);
+  });
+});
+
+describe('parsearSolicitudCliente', () => {
+  it('parsea rut, correo y razón social', () => {
+    const s = parsearSolicitudCliente('/cliente-nuevo 78123456-7 pagos@fulano.cl Constructora Fulano SpA');
+    expect(s).toEqual({
+      rut: '78123456-7',
+      email: 'pagos@fulano.cl',
+      razonSocial: 'Constructora Fulano SpA',
+    });
+  });
+
+  it('normaliza el rut con puntos y con K minúscula', () => {
+    const s = parsearSolicitudCliente('/cliente-nuevo 77.859.563-k correo@x.cl Empresa X');
+    expect(s.rut).toBe('77859563-K');
+  });
+
+  // El dígito verificador es la única defensa contra un dedazo: un RUT con
+  // DV incorrecto no existe, y el padrón del SII lo rechazaría recién al emitir.
+  it('rechaza un rut con dígito verificador equivocado', () => {
+    expect(() => parsearSolicitudCliente('/cliente-nuevo 78123456-9 x@y.cl Empresa')).toThrow(/rut/i);
+  });
+
+  it('rechaza un correo inválido', () => {
+    expect(() => parsearSolicitudCliente('/cliente-nuevo 78123456-7 no-es-correo Empresa')).toThrow(/correo/i);
+  });
+
+  it('exige razón social', () => {
+    expect(() => parsearSolicitudCliente('/cliente-nuevo 78123456-7 x@y.cl')).toThrow(/raz[óo]n social/i);
+  });
+
+  it('no confunde el comando con /factura', () => {
+    expect(() => parsearSolicitudCliente('/factura CLI-022 1000 Algo')).toThrow(/cliente-nuevo/);
+  });
+});
+
+describe('siguienteClienteId', () => {
+  it('toma el mayor correlativo y suma uno, conservando el ancho', () => {
+    expect(siguienteClienteId(['CLI-021', 'CLI-031', 'CLI-025'])).toBe('CLI-032');
+  });
+
+  it('empieza en CLI-001 si la tabla está vacía', () => {
+    expect(siguienteClienteId([])).toBe('CLI-001');
+  });
+
+  it('ignora identificadores que no siguen el patrón', () => {
+    expect(siguienteClienteId(['CLI-007', 'OTRO', 'X-99'])).toBe('CLI-008');
+  });
+});
+
+// Alimenta la ruta del PDF en R2 (`facturas/<carpeta>/AAAA/MM/...`), que el
+// Worker valida rechazando '/' y '..'. Un nombre sin sanear rompería la subida
+// después de tener folio, que es el peor momento posible.
+describe('carpetaDesdeRazonSocial', () => {
+  it('usa la razón social tal cual cuando ya es segura', () => {
+    expect(carpetaDesdeRazonSocial('Constructora Fulano SpA')).toBe('Constructora Fulano SpA');
+  });
+
+  it('quita las barras', () => {
+    expect(carpetaDesdeRazonSocial('Perez / Soto Ltda')).toBe('Perez Soto Ltda');
+  });
+
+  it('neutraliza los puntos suspensivos de ruta', () => {
+    expect(carpetaDesdeRazonSocial('..Empresa..')).toBe('Empresa');
+  });
+
+  it('nunca devuelve vacío', () => {
+    expect(carpetaDesdeRazonSocial('///')).toBe('SIN NOMBRE');
   });
 });

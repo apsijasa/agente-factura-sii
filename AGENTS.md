@@ -44,7 +44,7 @@ emitidos los folios 35 a 69 contra el portal real.
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
-Los cuatro en verde. Son 306 pruebas y corren en ~2 segundos; no hay excusa
+Los cuatro en verde. Son 331 pruebas y corren en ~2 segundos; no hay excusa
 para saltarlas. **Las pruebas automáticas jamás tocan el SII real ni envían
 correos.**
 

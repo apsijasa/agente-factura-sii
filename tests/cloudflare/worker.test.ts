@@ -149,6 +149,23 @@ describe('Worker /telegram-webhook', () => {
     const fila = cf.db.prepare('SELECT estado, factura_id FROM solicitudes_facturas WHERE id = 1').get();
     expect(fila).toEqual({ estado: 'PROCESADA', factura_id: 'PUNTUAL:X' });
   });
+  it('encola /cliente-nuevo igual que /factura y avisa que no emite nada', async () => {
+    const telegram = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', telegram);
+    const cf = crearCloudflareFalso({ TELEGRAM_WEBHOOK_SECRET: 's3', TELEGRAM_CHAT_ID: '42', TELEGRAM_BOT_TOKEN: 'bot' });
+    const headers = { 'x-telegram-bot-api-secret-token': 's3' };
+    const alta = '/cliente-nuevo 78123456-7 pagos@fulano.cl Constructora Fulano SpA';
+
+    await cf.llamarWorker('https://agente.test/telegram-webhook', { method: 'POST', headers, body: cuerpo(alta) });
+
+    const pendientes = await new SolicitudesCloudflare(cf.api).pendientes();
+    expect(pendientes).toEqual([{ id: 1, chat_id: '42', texto: alta }]);
+    // El Worker no interpreta el comando: solo lo encola. Toda la validación
+    // (RUT, correo, duplicados) vive en el agente, probada en frío.
+    const [, init] = telegram.mock.calls[0] as unknown as [string, { body: string }];
+    expect(JSON.parse(init.body).text).toContain('no emite ninguna factura');
+  });
+
   it('si D1 falla, el chat recibe un aviso genérico y el error crudo queda en el log', async () => {
     const telegram = vi.fn(async () => new Response('{}'));
     vi.stubGlobal('fetch', telegram);

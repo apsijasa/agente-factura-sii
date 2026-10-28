@@ -37,6 +37,7 @@ function depsSolicitudes(): Dependencias {
       leerTabla: vi.fn(async (nombre: string) =>
         nombre === 'tblEmpresas' ? filasEmpresas : nombre === 'tblClientes' ? filasClientes : []),
       agregarFilaFacturas: vi.fn(async () => undefined),
+      agregarFilaClientes: vi.fn(async () => undefined),
       actualizarFilaFacturas: vi.fn(async () => undefined),
     } as never,
     uf: {
@@ -124,7 +125,86 @@ describe('ejecutarProcesarSolicitudes', () => {
     const { repo } = repoFalso([]);
     const { canal } = canalColector();
     const r = await ejecutarProcesarSolicitudes(deps, repo, canal);
-    expect(r).toEqual({ procesadas: [], rechazadas: [] });
+    expect(r).toEqual({ procesadas: [], rechazadas: [], clientesCreados: [] });
     expect((deps.excel.leerTabla as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+});
+
+// Alta de clientes puntuales por Telegram. El alta va separada de la factura a
+// propósito: así el operador ve la razón social antes de que exista documento.
+describe('ejecutarProcesarSolicitudes y /cliente-nuevo', () => {
+  it('da de alta el cliente con el correlativo siguiente y NO crea factura', async () => {
+    const deps = depsSolicitudes();
+    const { repo, procesadas } = repoFalso([
+      { id: 11, chat_id: '1', texto: '/cliente-nuevo 78.123.456-7 pagos@fulano.cl Constructora Fulano SpA' },
+    ]);
+    const { canal, mensajes } = canalColector();
+
+    const r = await ejecutarProcesarSolicitudes(deps, repo, canal);
+
+    expect(r.clientesCreados).toEqual(['CLI-023']);
+    expect(r.procesadas).toEqual([]);
+    expect(await deps.store.listarFacturaIds()).toEqual([]);
+    expect(procesadas).toEqual([{ id: 11, facturaId: 'CLIENTE:CLI-023' }]);
+
+    const fila = (deps.excel.agregarFilaClientes as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(fila).toMatchObject({
+      cliente_id: 'CLI-023',
+      razon_social: 'Constructora Fulano SpA',
+      nombre_carpeta: 'Constructora Fulano SpA',
+      rut_cliente: '78123456-7',
+      email_facturacion: 'pagos@fulano.cl',
+      activo: 'TRUE',
+    });
+    // El padrón del SII los completa al emitir; el libro es solo respaldo.
+    expect(fila).toMatchObject({ giro: '', direccion: '', comuna: '', ciudad: '' });
+    expect(mensajes[0]).toContain('Constructora Fulano SpA');
+    expect(mensajes[0]).toContain('/factura CLI-023');
+  });
+
+  // Un RUT duplicado rompería resolverCliente por ambigüedad y dejaría al
+  // operador sin poder facturarle a ninguno de los dos.
+  it('rechaza un RUT que ya está en el libro y dice con qué cliente facturar', async () => {
+    const deps = depsSolicitudes();
+    const { repo, rechazadas } = repoFalso([
+      { id: 12, chat_id: '1', texto: '/cliente-nuevo 78.264.318-5 otro@correo.cl Otra Razon SpA' },
+    ]);
+    const { canal, mensajes } = canalColector();
+
+    const r = await ejecutarProcesarSolicitudes(deps, repo, canal);
+
+    expect(r.clientesCreados).toEqual([]);
+    expect(rechazadas[0]?.error).toContain('CLI-022');
+    expect(mensajes[0]).toContain('/factura CLI-022');
+    expect(deps.excel.agregarFilaClientes as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('un RUT con dígito verificador equivocado no llega al libro', async () => {
+    const deps = depsSolicitudes();
+    const { repo } = repoFalso([
+      { id: 13, chat_id: '1', texto: '/cliente-nuevo 78123456-9 x@y.cl Empresa Equivocada' },
+    ]);
+    const { canal, mensajes } = canalColector();
+
+    await ejecutarProcesarSolicitudes(deps, repo, canal);
+
+    expect(deps.excel.agregarFilaClientes as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(mensajes[0]).toMatch(/RUT inv[áa]lido/i);
+  });
+
+  // Las dos pueden llegar seguidas y el libro se lee una sola vez por lote.
+  it('una /factura del mismo lote ya ve al cliente recién dado de alta', async () => {
+    const deps = depsSolicitudes();
+    const { repo } = repoFalso([
+      { id: 14, chat_id: '1', texto: '/cliente-nuevo 78.123.456-7 pagos@fulano.cl Constructora Fulano SpA' },
+      { id: 15, chat_id: '1', texto: '/factura CLI-023 450000 Asesoría puntual' },
+    ]);
+    const { canal } = canalColector();
+
+    const r = await ejecutarProcesarSolicitudes(deps, repo, canal);
+
+    expect(r.clientesCreados).toEqual(['CLI-023']);
+    expect(r.procesadas).toEqual(['PUNTUAL:E1:CLI-023:2026-07-26:15']);
+    expect(r.rechazadas).toEqual([]);
   });
 });

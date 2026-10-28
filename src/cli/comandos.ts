@@ -2,7 +2,7 @@
 import { hashPayload } from '../domain/hash.js';
 import { agruparCobros } from '../domain/agrupacion.js';
 import { construirPayload, type ClasificacionEmisor } from '../domain/motor.js';
-import { esquemaCliente, esquemaCobro, esquemaEmpresa } from '../domain/validacion.js';
+import { esquemaCliente, esquemaCobro, esquemaEmpresa, type ClienteValidado } from '../domain/validacion.js';
 import type { InvoicePayload } from '../domain/tipos.js';
 import type { ExcelAdapter } from '../adapters/excel/excel-adapter.js';
 import type { UfProvider } from '../adapters/uf/uf-provider.js';
@@ -11,7 +11,13 @@ import type { MailService } from '../services/correo.js';
 import { resumenAprobacion, type IAprobacion } from '../services/aprobacion.js';
 import { crearToken } from '../services/token-aprobacion.js';
 import type { CanalNotificacion } from '../services/notificador.js';
-import { parsearSolicitudFactura, resolverCliente } from '../services/solicitudes.js';
+import {
+  carpetaDesdeRazonSocial,
+  parsearSolicitudCliente,
+  parsearSolicitudFactura,
+  resolverCliente,
+  siguienteClienteId,
+} from '../services/solicitudes.js';
 import type { RepoSolicitudes } from '../store/solicitudes-supabase.js';
 import { periodoDe } from '../domain/fechas.js';
 import type { CobroRecurrente } from '../domain/tipos.js';
@@ -320,6 +326,49 @@ export async function ejecutarNotify(
 export interface ResultadoSolicitudes {
   procesadas: string[];
   rechazadas: number[];
+  /** cliente_id de las altas pedidas con /cliente-nuevo; no son facturas. */
+  clientesCreados: string[];
+}
+
+/**
+ * Alta de un cliente puntual (`/cliente-nuevo`). Deliberadamente NO crea
+ * ninguna factura: el operador ve primero a quién dio de alta y recién después
+ * pide la factura con /factura. Esa separación es lo que permite leer la razón
+ * social en el mensaje de aprobación, antes de que exista documento alguno.
+ *
+ * Giro, dirección, comuna y ciudad quedan vacíos: los precarga el padrón del
+ * SII desde el RUT al emitir, y el libro solo los usa como respaldo.
+ */
+async function altaClientePuntual(
+  deps: Dependencias,
+  clientes: ClienteValidado[],
+  texto: string,
+): Promise<ClienteValidado> {
+  const { rut, email, razonSocial } = parsearSolicitudCliente(texto);
+  const yaExiste = clientes.find((c) => c.rut_cliente === rut);
+  if (yaExiste) {
+    throw new Error(
+      `Ese RUT ya está en tblClientes como ${yaExiste.cliente_id} (${yaExiste.razon_social}). ` +
+        `Factúrale con: /factura ${yaExiste.cliente_id} <monto> <descripción>`,
+    );
+  }
+  const cliente: ClienteValidado = {
+    cliente_id: siguienteClienteId(clientes.map((c) => c.cliente_id)),
+    razon_social: razonSocial,
+    nombre_carpeta: carpetaDesdeRazonSocial(razonSocial),
+    rut_cliente: rut,
+    email_facturacion: email,
+    giro: '',
+    direccion: '',
+    comuna: '',
+    ciudad: '',
+    activo: true,
+  };
+  await deps.excel.agregarFilaClientes({
+    ...cliente,
+    activo: 'TRUE',
+  });
+  return cliente;
 }
 
 /**
@@ -334,7 +383,7 @@ export async function ejecutarProcesarSolicitudes(
   solicitudes: RepoSolicitudes,
   canal: CanalNotificacion,
 ): Promise<ResultadoSolicitudes> {
-  const resultado: ResultadoSolicitudes = { procesadas: [], rechazadas: [] };
+  const resultado: ResultadoSolicitudes = { procesadas: [], rechazadas: [], clientesCreados: [] };
   const pendientes = await solicitudes.pendientes();
   if (pendientes.length === 0) return resultado;
 
@@ -343,6 +392,21 @@ export async function ejecutarProcesarSolicitudes(
 
   for (const solicitud of pendientes) {
     try {
+      if (solicitud.texto.trim().startsWith('/cliente-nuevo')) {
+        const nuevo = await altaClientePuntual(deps, clientes, solicitud.texto);
+        // Se agrega en memoria para que una /factura de este mismo lote lo vea:
+        // las dos pueden llegar seguidas y el libro se leyó una sola vez arriba.
+        clientes.push(nuevo);
+        await solicitudes.marcarProcesada(solicitud.id, `CLIENTE:${nuevo.cliente_id}`);
+        await canal.enviar(
+          `✓ Cliente dado de alta\n\n${nuevo.cliente_id} — ${nuevo.razon_social}\nRUT ${nuevo.rut_cliente}\n` +
+            `PDF a ${nuevo.email_facturacion}\n\nSi algo está mal, corrígelo en tblClientes antes de facturar.\n\n` +
+            `Para facturarle:\n/factura ${nuevo.cliente_id} <monto neto> <descripción>`,
+        );
+        logger.info({ clienteId: nuevo.cliente_id, solicitud: solicitud.id }, 'cliente puntual dado de alta');
+        resultado.clientesCreados.push(nuevo.cliente_id);
+        continue;
+      }
       const parseada = parsearSolicitudFactura(solicitud.texto);
       const cliente = resolverCliente(clientes, parseada.clienteTexto);
       const empresa = empresas.find((e) => e.activo);

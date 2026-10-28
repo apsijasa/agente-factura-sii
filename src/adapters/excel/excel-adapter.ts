@@ -21,6 +21,7 @@ export const ENCABEZADOS = {
 
 export type NombreTabla = keyof typeof ENCABEZADOS;
 export type FilaFacturasExcel = Record<(typeof ENCABEZADOS.tblFacturas)[number], string>;
+export type FilaClientesExcel = Record<(typeof ENCABEZADOS.tblClientes)[number], string>;
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 
@@ -96,6 +97,15 @@ export class ExcelAdapter {
   async agregarFilaFacturas(fila: FilaFacturasExcel): Promise<void> {
     const valores = ENCABEZADOS.tblFacturas.map((clave) => fila[clave] ?? '');
     await this.graph.solicitar('POST', `${this.base()}/tables/tblFacturas/rows/add`, {
+      values: [valores],
+    });
+  }
+
+  /** Alta de un cliente puntual pedida por Telegram (`/cliente-nuevo`). */
+  async agregarFilaClientes(fila: FilaClientesExcel): Promise<void> {
+    await this.validarEncabezados('tblClientes');
+    const valores = ENCABEZADOS.tblClientes.map((clave) => fila[clave] ?? '');
+    await this.graph.solicitar('POST', `${this.base()}/tables/tblClientes/rows/add`, {
       values: [valores],
     });
   }
