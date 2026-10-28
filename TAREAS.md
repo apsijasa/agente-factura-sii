@@ -225,6 +225,20 @@ salió mal. No bloquea nada — el gate de emisión solo mira `APROBADA`.
 
 ---
 
+## ✅ 10. CI en cada push — HECHA (28-10-2026)
+
+Ningún workflow validaba nada en push: había 331 pruebas y cuatro chequeos, y
+la única garantía era que quien commiteara se acordara de correrlos. Frágil
+justamente porque a este repo le escriben agentes autónomos.
+
+`.github/workflows/ci.yml`: en cada push a `main` y en cada pull request, un
+solo job corre `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+**Sin secretos** (las pruebas jamás tocan el SII ni envían correos) y **fuera
+del grupo `facturacion-sii`**: un CI que espere o bloquee una emisión real es
+peor que no tener CI. Tiene su propio grupo por rama.
+
+---
+
 ## Lo que la revisión encontró bien resuelto
 
 Vale dejarlo escrito para no "arreglar" lo que ya está bien:

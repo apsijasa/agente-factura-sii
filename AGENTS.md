@@ -46,7 +46,10 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 
 Los cuatro en verde. Son 331 pruebas y corren en ~2 segundos; no hay excusa
 para saltarlas. **Las pruebas automáticas jamás tocan el SII real ni envían
-correos.**
+correos.** Desde el 28-10-2026 CI (`.github/workflows/ci.yml`) corre esos
+mismos cuatro en cada push a `main` y en cada pull request, sin secretos y
+fuera del grupo `facturacion-sii`; que esté verde no reemplaza correrlos antes
+de commitear, solo atrapa al que se olvidó.
 
 ### Puesta en marcha
 

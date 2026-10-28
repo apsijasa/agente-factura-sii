@@ -1,0 +1,40 @@
+# Los cuatro chequeos (lint, typecheck, test, build) en cada push a main y en
+# cada pull request. Hasta ahora nada los corría en el repo: la única garantía
+# era que quien commiteara se acordara, y a este repo le escriben agentes
+# autónomos.
+#
+# A propósito NO está en el grupo de concurrencia facturacion-sii: ese grupo
+# serializa emisiones reales, y un CI que espere a una emisión —o que la haga
+# esperar— es peor que no tener CI. Tiene su propio grupo por rama, para que
+# un push nuevo cancele el CI del anterior.
+#
+# Tampoco recibe ningún secreto: las pruebas jamás tocan el SII ni envían
+# correos. Si algún día un chequeo necesitara uno, el error estaría en el
+# chequeo, no aquí.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chequeos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
