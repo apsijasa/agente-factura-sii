@@ -129,8 +129,8 @@ firmante en Node. La prueba nueva en `tests/cloudflare/worker.test.ts` usa un
 `factura_id` con tilde y **falla sin el arreglo** (404, "Factura no
 encontrada"), así que no puede volver a romperse en silencio.
 
-**Pendiente:** el arreglo no llega a producción hasta correr `wrangler deploy`
-desde `cloudflare/` (ver tarea 2b).
+**Desplegado** el 28-10-2026 (versión `a4063589`), junto con el resto de los
+cambios del Worker. Verificado leyendo el código desplegado desde Cloudflare.
 
 
 ---
@@ -145,9 +145,13 @@ emisión: espera a que termine. Instala wrangler con `npm ci` desde
 No aplica migraciones de D1.
 
 **Pendiente del operador:** crear el token en Cloudflare (plantilla *Edit
-Cloudflare Workers*) y guardarlo como secreto `CLOUDFLARE_API_TOKEN`; luego
-disparar el workflow para que los arreglos del Worker (2, 3, M3, M4, B1, B5,
-B3) lleguen a producción.
+Cloudflare Workers*) y guardarlo como secreto `CLOUDFLARE_API_TOKEN`; mientras
+no exista, el workflow termina sin hacer nada.
+
+**Mientras tanto, el 28-10-2026 se desplegó a mano** (`npx wrangler deploy`
+desde `cloudflare/`, versión `a4063589`, con el árbol limpio en `main`). El
+Worker en producción ya tiene 2, 3, M3, M4, B1, B5, B3 y `/cliente-nuevo`;
+se verificó leyendo el código desplegado: `COMANDOS` incluye `/cliente-nuevo`.
 
 ---
 
